@@ -7,6 +7,7 @@ from pathlib import Path
 
 from nicegui import ui
 
+from app.paths import EXPORTS_DIR
 from app.logger import get_logger
 
 _log = get_logger("common")
@@ -23,6 +24,29 @@ def _open_path(path: Path) -> None:
             subprocess.Popen(["xdg-open", str(path)])
     except Exception:
         pass
+
+
+def safe_download(data: bytes, filename: str) -> None:
+    """기본 폴더 저장: EXPORTS_DIR에 자동 저장 + 열기 버튼 알림.  Browser 모드: ui.download()."""
+    if getattr(sys, '_nicegui_native', False):
+        saved = EXPORTS_DIR / filename
+        saved.write_bytes(data)
+        _log.info("기본 폴더 저장: %s (%d bytes)", saved, len(data))
+        with ui.dialog() as dlg, ui.card().classes("items-center p-6 gap-3"):
+            ui.label(f"저장 완료: {saved.name}").classes("font-bold")
+            ui.label(str(saved)).classes("text-xs text-gray-500 break-all")
+            with ui.row().classes("gap-3 mt-2"):
+                ui.button("파일 열기", on_click=lambda: (_open_path(saved), dlg.close())).classes(
+                    "bg-orange-500 text-white"
+                )
+                ui.button("폴더 열기", on_click=lambda: (_open_path(EXPORTS_DIR), dlg.close())).classes(
+                    "bg-gray-200 text-gray-700"
+                )
+                ui.button("닫기", on_click=dlg.close).classes("bg-gray-100")
+        dlg.open()
+        return
+    _log.info("브라우저 다운로드: %s (%d bytes)", filename, len(data))
+    ui.download(data, filename=filename)
 
 
 NAV_PAGES = [
