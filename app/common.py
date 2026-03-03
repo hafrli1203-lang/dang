@@ -105,7 +105,7 @@ NAV_PAGES = [
 def create_nav(current: str) -> None:
     with ui.header().classes("bg-orange-500 text-white"):
         with ui.row().classes("w-full items-center px-6 py-2 gap-6"):
-            ui.label("\U0001f955 당근 광고 기획 도우미").classes(
+            ui.label("🥕 당근 광고 기획 도우미").classes(
                 "text-xl font-bold tracking-tight"
             )
             ui.space()
