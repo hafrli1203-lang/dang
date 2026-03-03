@@ -1,0 +1,15 @@
+nicegui>=2.0.0
+platformdirs>=4.0.0
+anthropic>=0.40.0
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+openpyxl>=3.1.0
+python-docx>=1.1.0
+matplotlib>=3.8.0
+# pywebview is optional — needed only for native desktop window mode.
+# Install separately if desired: pip install pywebview
+# On Windows it additionally requires: pip install pywebview[cef]  (or msedge-selenium-tools)
+# docx2pdf is optional — needed only for PDF conversion in verify_reports.py --pdf.
+# Windows requires Microsoft Word; macOS works with Word or LibreOffice.
+# Install separately if desired: pip install docx2pdf

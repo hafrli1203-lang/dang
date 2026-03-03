@@ -1,0 +1,33 @@
+# API keys / secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Test outputs
+verify_*.docx
+verify_*.pdf
+_charts/
+_charts_tmp/
+
+# Runtime data (managed in AppData)
+*.db
+app.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
