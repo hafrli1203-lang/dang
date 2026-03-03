@@ -1,0 +1,137 @@
+"""AI provider abstractions.
+
+Provides a common synchronous interface so callers don't care which SDK is used.
+Each provider is a plain class; async wrapping (run_in_executor) is the caller's job.
+
+Usage:
+    from app.ai.providers import get_provider
+    provider = get_provider("claude")          # or "gemini"
+    text = provider.generate_text(prompt)      # blocking call
+
+Environment variables (all optional — keys raise ValueError at call time if missing):
+    ANTHROPIC_API_KEY   — Anthropic secret key
+    CLAUDE_MODEL        — model override  (default: claude-opus-4-6)
+    GEMINI_API_KEY      — Google GenAI key
+    GEMINI_MODEL        — model override  (default: gemini-3.1-pro-preview)
+"""
+from __future__ import annotations
+
+import os
+from abc import ABC, abstractmethod
+
+from app.logger import get_logger
+
+_log = get_logger("providers")
+
+
+class BaseProvider(ABC):
+    """Common interface for all AI providers."""
+
+    @abstractmethod
+    def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
+        """Send *prompt* to the model and return the generated text string.
+
+        Args:
+            prompt: User-visible prompt (data + section headings).
+            system_prompt: Internal system instruction (톤·포맷 가이드).
+                           Passed via the provider's system channel so that
+                           the instruction text never appears in the output.
+        """
+
+
+class ClaudeProvider(BaseProvider):
+    """Anthropic Claude via Messages API."""
+
+    DEFAULT_MODEL = "claude-opus-4-6"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+    ) -> None:
+        import anthropic
+
+        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        if not self._api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is not set. "
+                "Add it to your .env file or environment."
+            )
+        self._model = model or os.getenv("CLAUDE_MODEL", self.DEFAULT_MODEL)
+        self._max_tokens = max_tokens
+        self._client = anthropic.Anthropic(api_key=self._api_key)
+
+    def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
+        kwargs: dict = dict(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        try:
+            _log.info("Claude API 호출 시작 (model=%s)", self._model)
+            response = self._client.messages.create(**kwargs)
+            _log.info("Claude API 호출 완료")
+        except Exception as exc:
+            _log.error("Claude API 호출 실패: %s", exc)
+            raise ValueError(f"Claude API 호출 실패: {exc}") from exc
+        return "".join(block.text for block in response.content if hasattr(block, "text"))
+
+
+class GeminiProvider(BaseProvider):
+    """Google Gemini via google-genai SDK."""
+
+    DEFAULT_MODEL = "gemini-3.1-pro-preview"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        from google import genai
+
+        self._api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        if not self._api_key:
+            raise ValueError(
+                "GEMINI_API_KEY is not set. "
+                "Add it to your .env file or environment."
+            )
+        self._model = model or os.getenv("GEMINI_MODEL", self.DEFAULT_MODEL)
+        self._client = genai.Client(api_key=self._api_key)
+
+    def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
+        kwargs: dict = dict(
+            model=self._model,
+            contents=prompt,
+        )
+        if system_prompt:
+            from google.genai import types
+            kwargs["config"] = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+            )
+        try:
+            _log.info("Gemini API 호출 시작 (model=%s)", self._model)
+            response = self._client.models.generate_content(**kwargs)
+            _log.info("Gemini API 호출 완료")
+        except Exception as exc:
+            _log.error("Gemini API 호출 실패: %s", exc)
+            raise ValueError(f"Gemini API 호출 실패: {exc}") from exc
+        return response.text
+
+
+def get_provider(engine: str) -> BaseProvider:
+    """Factory: 'claude' | 'gemini' → instantiated provider.
+
+    Raises:
+        ValueError: unknown engine name, or the required API key is missing.
+    """
+    if engine == "claude":
+        return ClaudeProvider()
+    elif engine == "gemini":
+        return GeminiProvider()
+    else:
+        raise ValueError(
+            f"Unknown engine {engine!r}. Valid values: 'claude', 'gemini'."
+        )
