@@ -27,6 +27,7 @@ init_db()
 # ── Register pages (side-effect of import) ────────────────────────────────────
 import app.pages.project   # noqa: F401
 import app.pages.planning  # noqa: F401
+import app.pages.report    # noqa: F401
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 from nicegui import ui, app as nicegui_app
