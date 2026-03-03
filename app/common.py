@@ -49,6 +49,52 @@ def safe_download(data: bytes, filename: str) -> None:
     ui.download(data, filename=filename)
 
 
+async def save_as_download(data: bytes, filename: str) -> bool:
+    """다른 위치로 저장: native면 Save As 다이얼로그, browser면 ui.download(). 성공 시 True."""
+    from app.exporting import choose_save_path_docx
+
+    path = await choose_save_path_docx(filename)
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        _log.info("Save As 저장: %s (%d bytes)", path, len(data))
+        ui.notify(f"저장 완료: {path}", type="positive", timeout=6000, close_button="확인")
+        return True
+
+    # browser mode or native cancel → fall back to browser download
+    if not getattr(sys, "_nicegui_native", False):
+        _log.info("브라우저 다운로드 (Save As fallback): %s (%d bytes)", filename, len(data))
+        ui.download(data, filename=filename)
+        return True
+
+    # native cancel
+    _log.info("Save As 취소됨: %s", filename)
+    return False
+
+async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
+    """여러 파일: 폴더 다이얼로그 1회. 단일 파일: 기존 Save As. browser: ui.download()."""
+    if len(pairs) == 1:
+        return await save_as_download(pairs[0][0], pairs[0][1])
+
+    from app.exporting import choose_save_folder
+
+    folder = await choose_save_folder()
+    if folder is not None:
+        folder.mkdir(parents=True, exist_ok=True)
+        for data, filename in pairs:
+            (folder / filename).write_bytes(data)
+            _log.info("Save As (폴더): %s/%s (%d bytes)", folder, filename, len(data))
+        ui.notify(f"저장 완료: {folder}", type="positive", timeout=8000, close_button="확인")
+        return True
+
+    if not getattr(sys, "_nicegui_native", False):
+        for data, filename in pairs:
+            ui.download(data, filename=filename)
+        return True
+
+    return False  # native cancel
+
+
 NAV_PAGES = [
     ("프로젝트 관리", "/"),
     ("광고 기획", "/planning"),
