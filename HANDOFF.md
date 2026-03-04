@@ -254,6 +254,76 @@ verify_reports.py:
   verify_기획서.docx       36.7 KB — OK
 ```
 
+---
+
+## 2026-03-04: P0 통합 — AppData 경로 + ExportManager + Nano Banana
+
+### 데이터 경로 (AppData)
+
+모든 사용자 데이터는 `%LOCALAPPDATA%\daangn_ad_reporter`에 저장된다:
+
+| 용도 | 경로 |
+|------|------|
+| DB | `%LOCALAPPDATA%\daangn_ad_reporter\daangn_ads.db` |
+| DOCX 내보내기 | `...\exports\` |
+| 차트 PNG | `...\charts\` |
+| 썸네일 PNG | `...\thumbnails\` |
+| NiceGUI 스토리지 | `...\storage\` |
+| 로그 | `...\app.log` |
+
+- `app/paths.py`: `platformdirs.user_data_dir()` 기반, `sanitize_filename()`, `ensure_dirs()` 포함
+- `app/database.py`: `_migrate_legacy_db()` — 앱 폴더의 레거시 DB를 AppData로 1회 마이그레이션
+- `main.py`: `ensure_dirs()` 호출 + `migrate_legacy_files()`로 .env 마이그레이션
+
+### 내보내기 UX (네이티브 vs 브라우저)
+
+`app/export_manager.py` → `ExportManager` 클래스가 모든 저장 로직 통합:
+
+| 메서드 | 네이티브 모드 (pywebview) | 브라우저 모드 |
+|--------|---------------------------|---------------|
+| `save_default()` | AppData에 파일 저장 + "폴더 열기" 다이얼로그 | AppData 저장 + `ui.download()` 브라우저 다운로드 |
+| `save_as()` | pywebview SAVE_DIALOG → 사용자 선택 경로 | `ui.download()` fallback |
+| `save_as_multi()` | 파일마다 SAVE_DIALOG | 파일마다 `ui.download()` |
+
+- `app/native_dialogs.py`: `is_native_available()`, `ask_save_path()`, `open_folder()`
+- `app/common.py`: backward-compat wrapper (`safe_download` → `ExportManager.save_default` delegate)
+- 페이지 파일: `planning.py`, `report.py`, `thumbnail.py` 모두 `ExportManager` 직접 사용
+
+### Gemini 모델 설정
+
+| 용도 | env var | 기본값 |
+|------|---------|--------|
+| 텍스트 생성 | `GEMINI_MODEL` | `gemini-3.1-pro-preview` |
+| providers.py 이미지 | `GEMINI_IMAGE_MODEL` | `gemini-2.0-flash-preview-image-generation` |
+| image_provider.py 썸네일 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` (Nano Banana) |
+
+### 테스트 결과
+
+```
+docx_report:  19/19 OK
+providers:    26/26 OK
+parsers:       8/8  OK
+updater:       8/8  OK
+합계:         82/82 OK (15 skipped)
+```
+
 ### 남은 TODO
-- [ ] **Native Save As E2E 테스트**: pywebview 설치 환경에서 `native=True` 실행 후 "다른 위치로 저장..." 클릭 → 파일 다이얼로그 실제 동작 확인
-- [ ] **"both" 엔진 Save As UX**: Claude+Gemini 시 Save As 다이얼로그 2회 연속 호출됨. 폴더 선택 방식으로 개선 검토
+
+**P0-1: 업로드/에러 안정화**
+- [ ] CSV/XLSX 업로드 시 인코딩 자동 감지 개선 (cp949 이외 EUC-KR 등)
+- [ ] 대용량 파일 업로드 시 프로그레스 표시
+- [ ] AI API 타임아웃/네트워크 오류 시 재시도 UX
+
+**P1: 소식글 강제 출력 포맷**
+- [ ] 검증 실패 시 사용자에게 누락 항목 시각적 표시 (현재 로그만)
+- [ ] 자동 보정 2회 이상 재시도 옵션
+- [ ] 카테고리별 검증 규칙 분리 (현재 default만 검증)
+
+**P1: Gemini 안정화**
+- [ ] Gemini API rate limit 대응 (429 → 자동 대기/재시도)
+- [ ] 이미지 생성 실패 시 프롬프트 가이드라인 자동 제안
+
+**P2: Nano Banana 썸네일**
+- [ ] 생성된 이미지 히스토리 관리 (세션 내 되돌리기)
+- [ ] 텍스트 오버레이 후처리 (PIL/Pillow로 카피 합성)
+- [ ] 다중 비율 동시 생성 (1:1 + 4:5 + 9:16 한번에)
