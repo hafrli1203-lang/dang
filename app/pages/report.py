@@ -4,9 +4,10 @@ import io
 from pathlib import Path
 from typing import List, Dict
 
-from nicegui import ui, app as nicegui_app, events
+from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav, safe_download, save_as_download, save_as_download_multi, create_log_panel, create_path_info_panel
+from app.common import create_nav, create_log_panel, create_path_info_panel
+from app.export_manager import ExportManager
 from app.paths import CHARTS_DIR
 from app.database import (
     get_project,
@@ -19,6 +20,7 @@ from app.database import (
 from app.ai_engine import build_report_prompt, calc_kpi, SYSTEM_GUIDE_REPORT
 from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
 from app.reporting.docx_report import build_report_docx
+from app.reporting.parsers import parse_daangn_csv
 from app.chart_preview import make_charts  # chart preview only
 
 
@@ -31,8 +33,23 @@ def _parse_int(val) -> int:
         return 0
 
 
-def _parse_excel(content: bytes) -> List[Dict]:
-    """Parse uploaded Excel file.
+_EXPECTED_COLS = ("기간", "비용", "노출", "클릭", "문의", "단골", "쿠폰")
+
+
+def _validate_excel_header(header_row: tuple) -> str | None:
+    """헤더 행 검증. 문제가 있으면 경고 메시지 반환, 없으면 None."""
+    if not header_row or len(header_row) < 7:
+        return f"열이 7개 미만입니다 (발견: {len(header_row) if header_row else 0}개). 순서: 기간|비용|노출|클릭|문의|단골|쿠폰"
+    # 핵심 열 이름 검증 (부분 매칭)
+    h = [str(c or "").strip().replace("(원)", "").replace("(명)", "").replace("(건)", "").replace("(회)", "") for c in header_row[:7]]
+    for idx, expected in enumerate(_EXPECTED_COLS):
+        if expected not in h[idx]:
+            return f"열 {idx+1} 이름이 '{h[idx]}'인데 '{expected}'이 포함되어야 합니다."
+    return None
+
+
+def _parse_excel(content: bytes) -> tuple[List[Dict], str | None]:
+    """Parse uploaded Excel file. Returns (rows, warning_or_none).
 
     Expected columns (row 1 = header):
     기간 | 비용 | 노출 | 클릭 | 문의 | 단골 | 쿠폰
@@ -42,8 +59,10 @@ def _parse_excel(content: bytes) -> List[Dict]:
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb.active
     rows_out = []
+    warning = None
     for i, row in enumerate(ws.iter_rows(values_only=True)):
         if i == 0:
+            warning = _validate_excel_header(row)
             continue  # skip header
         if not any(row):
             continue
@@ -54,11 +73,11 @@ def _parse_excel(content: bytes) -> List[Dict]:
                 "impressions": _parse_int(row[2]),
                 "clicks": _parse_int(row[3]),
                 "inquiries": _parse_int(row[4]),
-                "regulars": _parse_int(row[5]),
-                "coupons": _parse_int(row[6]),
+                "regulars": _parse_int(row[5] if len(row) > 5 else 0),
+                "coupons": _parse_int(row[6] if len(row) > 6 else 0),
             }
         )
-    return rows_out
+    return rows_out, warning
 
 
 def _blank_row(idx: int) -> Dict:
@@ -288,6 +307,40 @@ def _make_report_docx_bytes(project: dict, rows: List[Dict], kpi: dict, content:
         return out.read_bytes()
 
 
+def _create_sample_excel() -> None:
+    """Generate a sample Excel template."""
+    try:
+        import openpyxl
+    except ImportError:
+        ui.notify("openpyxl이 설치되지 않았습니다: pip install openpyxl", type="negative")
+        return
+
+    try:
+        from app.paths import EXPORTS_DIR
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "성과데이터"
+        headers = ["기간", "비용(원)", "노출", "클릭", "문의", "단골", "쿠폰"]
+        ws.append(headers)
+        sample_rows = [
+            ["1주차", 75000, 12000, 480, 18, 3, 5],
+            ["2주차", 75000, 13500, 540, 21, 4, 7],
+            ["3주차", 75000, 11800, 420, 16, 2, 4],
+            ["4주차", 75000, 14200, 610, 25, 5, 9],
+        ]
+        for r in sample_rows:
+            ws.append(r)
+
+        downloads = Path.home() / "Downloads"
+        out_dir = downloads if downloads.exists() else EXPORTS_DIR
+        out = out_dir / "당근광고_성과템플릿.xlsx"
+        wb.save(out)
+        ui.notify(f"템플릿 저장: {out}", type="positive")
+    except Exception as exc:
+        ui.notify(f"템플릿 생성 오류: {exc}", type="negative")
+
+
 # ── Page ─────────────────────────────────────────────────────────────────────
 
 @ui.page("/report")
@@ -325,28 +378,34 @@ def report_page() -> None:
             ui.label("성과 데이터 입력").classes("font-bold text-gray-700 mb-3")
 
             with ui.tabs().classes("w-full") as tabs:
-                tab_excel = ui.tab("📊 엑셀 업로드")
+                tab_upload = ui.tab("📊 파일 업로드")
                 tab_manual = ui.tab("✏️ 수기 입력")
 
-            with ui.tab_panels(tabs, value=tab_excel).classes("w-full"):
+            with ui.tab_panels(tabs, value=tab_upload).classes("w-full"):
 
-                # ── Excel upload panel ─────────────────────────────────────
-                with ui.tab_panel(tab_excel):
+                # ── File upload panel (CSV + XLSX) ─────────────────────────
+                with ui.tab_panel(tab_upload):
                     ui.label(
-                        "열 순서: 기간 | 비용(원) | 노출 | 클릭 | 문의 | 단골 | 쿠폰  (1행=헤더)"
+                        "CSV: 당근 광고관리자 내려받기 파일 (헤더 자동 매핑)  |  "
+                        "XLSX: 기간|비용|노출|클릭|문의|단골|쿠폰 (1행=헤더)"
                     ).classes("text-xs text-gray-400 mb-2")
 
                     with ui.row().classes("gap-3 items-center"):
                         ui.upload(
-                            label="엑셀 파일 선택 (.xlsx)",
+                            label="파일 선택 (.csv / .xlsx)",
                             auto_upload=True,
-                            on_upload=lambda e: _handle_upload(e),
-                        ).classes("max-w-xs").props("accept=.xlsx")
+                            on_upload=lambda e: asyncio.ensure_future(_handle_upload(e)),
+                        ).classes("max-w-xs").props('accept=".csv,.xlsx"')
 
                         ui.button(
                             "샘플 템플릿 생성",
                             on_click=lambda: _create_sample_excel(),
                         ).classes("bg-gray-200 text-gray-700 text-sm")
+
+                    # ── 업로드 결과 요약 ──
+                    upload_summary = ui.column().classes("w-full mt-2 hidden")
+                    # ── 업로드 미리보기 ──
+                    upload_preview = ui.column().classes("w-full mt-3 hidden")
 
                 # ── Manual input panel ─────────────────────────────────────
                 with ui.tab_panel(tab_manual):
@@ -509,15 +568,101 @@ def report_page() -> None:
                 save_performance_rows(pid, rows)
                 ui.notify(f"{len(rows)}개 행 저장됨.", type="positive")
 
-        def _handle_upload(e: events.UploadEventArguments) -> None:
+        def _show_upload_preview(rows: List[Dict]) -> None:
+            upload_preview.clear()
+            upload_preview.classes(remove="hidden")
+            with upload_preview:
+                ui.label(f"업로드 데이터 미리보기 ({len(rows)}행)").classes(
+                    "font-medium text-sm text-gray-700"
+                )
+                columns = [
+                    {"name": "period_label", "label": "기간", "field": "period_label"},
+                    {"name": "cost", "label": "비용", "field": "cost"},
+                    {"name": "impressions", "label": "노출", "field": "impressions"},
+                    {"name": "clicks", "label": "클릭", "field": "clicks"},
+                    {"name": "inquiries", "label": "문의", "field": "inquiries"},
+                    {"name": "regulars", "label": "단골", "field": "regulars"},
+                    {"name": "coupons", "label": "쿠폰", "field": "coupons"},
+                ]
+                ui.table(columns=columns, rows=rows).classes("w-full").props(
+                    "dense flat bordered"
+                )
+
+        async def _handle_upload(e) -> None:
             try:
-                rows = _parse_excel(e.content.read())
-                if not rows:
-                    ui.notify("데이터를 찾을 수 없습니다. 헤더 행을 확인해주세요.", type="warning")
+                file_bytes = await e.file.read()
+                filename = e.file.name or ""
+                ext = Path(filename).suffix.lower()
+
+                upload_summary.clear()
+                upload_summary.classes(remove="hidden")
+
+                if ext == ".csv":
+                    csv_rows, warnings = parse_daangn_csv(file_bytes)
+                    # CSV 결과를 내부 row 포맷으로 변환 (date → period_label)
+                    rows = [
+                        {
+                            "period_label": r["date"],
+                            "cost": r["cost"],
+                            "impressions": r["impressions"],
+                            "clicks": r["clicks"],
+                            "inquiries": r["inquiries"],
+                            "regulars": r["regulars"],
+                            "coupons": r["coupons"],
+                        }
+                        for r in csv_rows
+                    ]
+                    # 매핑 요약 표시
+                    with upload_summary:
+                        with ui.card().classes("w-full bg-blue-50 p-3"):
+                            ui.label(f"CSV 파싱 결과: {len(rows)}행 매핑됨").classes(
+                                "font-medium text-sm text-blue-700"
+                            )
+                            mapped_cols = [
+                                k for k in ("date", "cost", "impressions", "clicks",
+                                            "inquiries", "regulars", "coupons")
+                                if csv_rows and k in csv_rows[0]
+                            ]
+                            ui.label(
+                                f"매핑 컬럼: {', '.join(mapped_cols)}"
+                            ).classes("text-xs text-blue-600")
+                            if warnings:
+                                skip_count = sum(1 for w in warnings if "skipped" in w.lower() or "empty" in w.lower())
+                                ui.label(
+                                    f"경고 {len(warnings)}건 (스킵 행: {skip_count})"
+                                ).classes("text-xs text-orange-600")
+                                for w in warnings[:5]:
+                                    ui.label(f"  - {w}").classes("text-xs text-gray-500")
+                                if len(warnings) > 5:
+                                    ui.label(f"  ... 외 {len(warnings) - 5}건").classes("text-xs text-gray-400")
+                    if not rows:
+                        ui.notify("CSV에서 유효한 데이터를 찾을 수 없습니다.", type="warning")
+                        return
+                elif ext == ".xlsx":
+                    rows, warning = _parse_excel(file_bytes)
+                    with upload_summary:
+                        with ui.card().classes("w-full bg-blue-50 p-3"):
+                            ui.label(f"XLSX 파싱 결과: {len(rows)}행 로드됨").classes(
+                                "font-medium text-sm text-blue-700"
+                            )
+                            ui.label(
+                                "컬럼: 기간, 비용, 노출, 클릭, 문의, 단골, 쿠폰"
+                            ).classes("text-xs text-blue-600")
+                            if warning:
+                                ui.label(f"경고: {warning}").classes("text-xs text-orange-600")
+                    if warning:
+                        ui.notify(f"⚠️ {warning}", type="warning", timeout=8000)
+                    if not rows:
+                        ui.notify("데이터를 찾을 수 없습니다. 헤더 행을 확인해주세요.", type="warning")
+                        return
+                else:
+                    ui.notify(f"지원하지 않는 파일 형식입니다: {ext}", type="negative")
                     return
+
                 _set_rows(rows)
+                _show_upload_preview(rows)
             except Exception as exc:
-                ui.notify(f"엑셀 파싱 오류: {exc}", type="negative")
+                ui.notify(f"파일 파싱 오류: {exc}", type="negative")
 
         def _apply_manual_inputs(inputs: List[dict]) -> None:
             rows = []
@@ -649,8 +794,8 @@ def report_page() -> None:
                         )
                         c_fname = f"성과보고서_{project_name}_Claude.docx"
                         g_fname = f"성과보고서_{project_name}_Gemini.docx"
-                        safe_download(c_bytes, filename=c_fname)
-                        safe_download(g_bytes, filename=g_fname)
+                        ExportManager.save_default(c_bytes, filename=c_fname)
+                        ExportManager.save_default(g_bytes, filename=g_fname)
                         download_status.set_text(f"✅ {c_fname}, {g_fname} 다운로드 시작됨")
                         ui.notify(
                             f"보고서 생성 완료!\n📥 {c_fname}\n📥 {g_fname}",
@@ -661,7 +806,7 @@ def report_page() -> None:
                             None, _make_report_docx_bytes, project, rows, kpi, content
                         )
                         fname = f"성과보고서_{project_name}.docx"
-                        safe_download(docx_bytes, filename=fname)
+                        ExportManager.save_default(docx_bytes, filename=fname)
                         download_status.set_text(f"✅ {fname} 다운로드 시작됨")
                         ui.notify(
                             f"보고서 생성 완료!\n📥 {fname}",
@@ -721,7 +866,7 @@ def report_page() -> None:
                 pairs = await _build_report_pairs()
                 names = []
                 for docx_bytes, fname in pairs:
-                    safe_download(docx_bytes, filename=fname)
+                    ExportManager.save_default(docx_bytes, filename=fname)
                     names.append(fname)
                 download_status.set_text(f"✅ {', '.join(names)} 저장 완료")
                 ui.notify(
@@ -742,7 +887,7 @@ def report_page() -> None:
             download_status.set_text("DOCX 파일 준비 중...")
             try:
                 pairs = await _build_report_pairs()
-                ok = await save_as_download_multi(pairs)
+                ok = await ExportManager.save_as_multi(pairs)
                 if ok:
                     names = [f for _, f in pairs]
                     download_status.set_text(f"✅ {', '.join(names)} 저장 완료")
@@ -755,35 +900,6 @@ def report_page() -> None:
                 ui.notify(f"내보내기 오류: {exc}", type="negative")
             finally:
                 export_saveas_btn.props(remove="disabled loading")
-
-        def _create_sample_excel() -> None:
-            """Generate a sample Excel template."""
-            try:
-                import openpyxl
-                from app.paths import EXPORTS_DIR
-
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = "성과데이터"
-                headers = ["기간", "비용(원)", "노출", "클릭", "문의", "단골", "쿠폰"]
-                ws.append(headers)
-                sample_rows = [
-                    ["1주차", 75000, 12000, 480, 18, 3, 5],
-                    ["2주차", 75000, 13500, 540, 21, 4, 7],
-                    ["3주차", 75000, 11800, 420, 16, 2, 4],
-                    ["4주차", 75000, 14200, 610, 25, 5, 9],
-                ]
-                for r in sample_rows:
-                    ws.append(r)
-
-                # Downloads 폴더 우선, 없으면 EXPORTS_DIR
-                downloads = Path.home() / "Downloads"
-                out_dir = downloads if downloads.exists() else EXPORTS_DIR
-                out = out_dir / "당근광고_성과템플릿.xlsx"
-                wb.save(out)
-                ui.notify(f"템플릿 저장: {out}", type="positive")
-            except Exception as exc:
-                ui.notify(f"템플릿 생성 오류: {exc}", type="negative")
 
         # ── Diagnostic log panel ──────────────────────────────────────────
         create_log_panel()

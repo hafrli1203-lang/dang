@@ -4,7 +4,8 @@ from pathlib import Path
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav, no_project_notice, safe_download, save_as_download, create_log_panel, create_path_info_panel
+from app.common import create_nav, no_project_notice, create_log_panel, create_path_info_panel
+from app.export_manager import ExportManager
 from app.database import (
     get_project,
     get_projects,
@@ -228,7 +229,7 @@ def planning_page() -> None:
             try:
                 loop = asyncio.get_event_loop()
                 docx_bytes, fname = await loop.run_in_executor(None, _build_docx_bytes)
-                safe_download(docx_bytes, fname)
+                ExportManager.save_default(docx_bytes, fname)
                 download_status.set_text(f"✅ {fname} 저장 완료")
                 ui.notify(f"📥 {fname}", type="positive", timeout=8000, close_button="확인")
             except ValueError as ve:
@@ -246,7 +247,7 @@ def planning_page() -> None:
             try:
                 loop = asyncio.get_event_loop()
                 docx_bytes, fname = await loop.run_in_executor(None, _build_docx_bytes)
-                ok = await save_as_download(docx_bytes, fname)
+                ok = await ExportManager.save_as(docx_bytes, fname)
                 if ok:
                     download_status.set_text(f"✅ {fname} 저장 완료")
                 else:

@@ -31,6 +31,7 @@ init_db()
 import app.pages.project   # noqa: F401
 import app.pages.planning  # noqa: F401
 import app.pages.report    # noqa: F401
+import app.pages.thumbnail  # noqa: F401
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 from nicegui import ui, app as nicegui_app
