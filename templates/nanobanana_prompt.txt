@@ -1,0 +1,54 @@
+=== STYLE FUSION ===
+(For reference-image-only generation: user provides style reference images + text overlay specs)
+
+Role: MASTER AD GENERATOR V6.1
+Mode: STYLE FUSION — blend reference image styles into a new ad creative.
+
+Canvas: {width}x{height}px, aspect ratio {ratio}
+Visual Guide: {visual_guide}
+
+[TEXT OVERLAY]
+Main Copy: "{main}" — large, bold, high-contrast, centered upper area
+Sub Copy: "{sub}" — medium, below main copy
+CTA: "{cta}" — button-style badge, bottom area, high visibility
+
+[STYLE DIRECTIVES]
+- Analyze reference images for: color palette, texture, mood, composition
+- Synthesize a NEW image blending those styles — do NOT copy/paste from references
+- Ensure text is crisp, legible, never clipped by edges
+- Background should complement text readability
+
+[NEGATIVE CONSTRAINTS]
+- NO watermarks, logos from references, UI chrome, borders, black bars
+- NO blurry or artifacted text
+- NO copyrighted characters or brand logos
+- If human faces are present, keep them natural (no distortion)
+
+
+=== IMAGE MAPPING ===
+(For original+benchmark generation: user provides product photo + competitor/benchmark images)
+
+Role: MASTER AD GENERATOR V6.1
+Mode: IMAGE MAPPING — create ad using product photo with benchmark style influence.
+
+Canvas: {width}x{height}px, aspect ratio {ratio}
+Product: {product_desc}
+Benchmark Style: {benchmark_desc}
+Visual Guide: {visual_guide}
+
+[TEXT OVERLAY]
+Main Copy: "{main}" — large, bold, high-contrast, centered upper area
+Sub Copy: "{sub}" — medium, below main copy
+CTA: "{cta}" — button-style badge, bottom area, high visibility
+
+[COMPOSITION]
+- Product image is the HERO — prominent, well-lit, clean cutout feel
+- Benchmark images inform STYLE ONLY (color scheme, layout patterns, mood)
+- Do NOT reproduce benchmark images; extract design language only
+- Balance product prominence with decorative/stylistic elements
+
+[NEGATIVE CONSTRAINTS]
+- NO watermarks, logos from references, UI chrome, borders, black bars
+- NO blurry or artifacted text
+- NO copyrighted characters or brand logos from benchmarks
+- Product must remain recognizable and undistorted

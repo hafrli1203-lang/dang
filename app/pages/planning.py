@@ -316,6 +316,236 @@ def planning_page() -> None:
             finally:
                 export_saveas_btn.props(remove="disabled loading")
 
+        # ── 썸네일 생성 패널 ──────────────────────────────────────────────
+        _thumb_state: dict = {
+            "ref_images": [],  # list of (bytes, mime_type)
+            "result_bytes": None,
+        }
+
+        with ui.expansion("썸네일 생성", icon="palette").classes(
+            "w-full bg-purple-50 mt-4"
+        ):
+            ui.label(
+                "기획 결과를 바탕으로 광고 썸네일 이미지를 생성합니다."
+            ).classes("text-xs text-gray-400 mb-3")
+
+            # 레퍼런스 이미지 업로드 (0~3장)
+            with ui.row().classes("items-start gap-4 flex-wrap"):
+                with ui.column().classes("gap-1"):
+                    ui.label("레퍼런스 이미지 (0~3장)").classes("text-sm font-medium text-gray-600")
+                    thumb_ref_upload = ui.upload(
+                        label="이미지 선택",
+                        auto_upload=True,
+                        on_upload=lambda e: asyncio.ensure_future(_thumb_handle_ref(e)),
+                        max_files=3,
+                    ).classes("max-w-xs").props('accept="image/*" multiple')
+                    thumb_ref_preview = ui.row().classes("gap-2 flex-wrap")
+                    ui.button(
+                        "레퍼런스 초기화",
+                        on_click=lambda: _thumb_clear_refs(),
+                    ).classes("text-xs bg-gray-200 text-gray-600")
+
+            # 비율 + 모드 선택
+            with ui.row().classes("items-start gap-8 flex-wrap mt-3"):
+                with ui.column().classes("gap-1"):
+                    ui.label("비율").classes("text-sm font-medium text-gray-600")
+                    thumb_ratio_sel = ui.select(
+                        {"1:1": "1:1 (정사각형)", "4:5": "4:5 (인스타)", "9:16": "9:16 (스토리)"},
+                        value="1:1",
+                        label="비율 선택",
+                    ).classes("w-48")
+
+                with ui.column().classes("gap-1"):
+                    ui.label("생성 모드").classes("text-sm font-medium text-gray-600")
+                    thumb_mode_sel = ui.select(
+                        {"style_fusion": "Style Fusion (스타일 합성)", "image_mapping": "Image Mapping (상품 매핑)"},
+                        value="style_fusion",
+                        label="모드 선택",
+                    ).classes("w-64")
+
+            # 텍스트 입력
+            with ui.row().classes("items-start gap-4 flex-wrap mt-3 w-full"):
+                thumb_main_input = ui.input(
+                    label="메인 카피",
+                    placeholder="예: 매일 아침 직접 반죽하는 빵",
+                ).classes("flex-1").props("outlined dense")
+                thumb_sub_input = ui.input(
+                    label="서브 카피",
+                    placeholder="예: 동네 빵집의 정성",
+                ).classes("flex-1").props("outlined dense")
+                thumb_cta_input = ui.input(
+                    label="CTA",
+                    placeholder="예: 지금 방문하기",
+                    value="자세히 보기",
+                ).classes("w-40").props("outlined dense")
+
+            thumb_visual_input = ui.textarea(
+                placeholder="비주얼 가이드: 따뜻한 오렌지톤, 밝은 자연광, 음식 클로즈업 등",
+                label="비주얼 가이드 (선택)",
+            ).classes("w-full mt-2").props("rows=2 outlined dense")
+
+            # 자동 추출 버튼
+            ui.button(
+                "기획 결과에서 카피 자동 추출",
+                on_click=lambda: _thumb_auto_extract(),
+            ).classes("text-xs bg-orange-100 text-orange-700 mt-1")
+
+            # 생성 버튼 + 결과
+            with ui.row().classes("gap-3 items-center mt-3"):
+                thumb_gen_btn = ui.button(
+                    "썸네일 생성",
+                    on_click=lambda: asyncio.ensure_future(_thumb_generate()),
+                    icon="palette",
+                ).classes("bg-purple-600 text-white px-6")
+                thumb_save_btn = ui.button(
+                    "PNG 저장",
+                    on_click=lambda: _thumb_save(),
+                    icon="save",
+                ).classes("bg-green-600 text-white px-4 hidden")
+                thumb_spinner = ui.spinner(size="28px").classes("hidden")
+                thumb_status = ui.label("").classes("text-sm text-gray-500 hidden")
+
+            thumb_result_container = ui.column().classes("w-full items-center mt-3")
+
+        # ── 썸네일 핸들러 ─────────────────────────────────────────────────
+
+        async def _thumb_handle_ref(e) -> None:
+            import base64
+            try:
+                data = await e.file.read()
+                mime = e.file.content_type or "image/png"
+                if len(_thumb_state["ref_images"]) >= 3:
+                    ui.notify("레퍼런스 이미지는 최대 3장까지 가능합니다.", type="warning")
+                    return
+                _thumb_state["ref_images"].append((data, mime))
+                b64 = base64.b64encode(data).decode()
+                with thumb_ref_preview:
+                    ui.image(f"data:{mime};base64,{b64}").classes(
+                        "w-20 h-20 object-cover rounded shadow"
+                    )
+            except Exception as exc:
+                ui.notify(f"이미지 읽기 오류: {exc}", type="negative")
+
+        def _thumb_clear_refs() -> None:
+            _thumb_state["ref_images"].clear()
+            thumb_ref_preview.clear()
+            thumb_ref_upload.reset()
+
+        def _thumb_auto_extract() -> None:
+            """기획 결과에서 메인 카피, 서브 카피, CTA를 자동 추출."""
+            import re
+            content = _state.get("content", "")
+            if not content:
+                ui.notify("먼저 기획 콘텐츠를 생성해주세요.", type="warning")
+                return
+
+            # [제목] 패턴에서 메인 카피 추출
+            title_match = re.search(r"\[제목\]\s*(.+)", content)
+            if title_match:
+                thumb_main_input.set_value(title_match.group(1).strip()[:50])
+
+            # 광고 카피에서 첫 번째 항목을 서브 카피로
+            copy_match = re.search(r"(?:^|\n)\s*1[.)]\s*(.+)", content)
+            if copy_match:
+                thumb_sub_input.set_value(copy_match.group(1).strip()[:50])
+
+            ui.notify("카피 자동 추출 완료", type="positive", timeout=3000)
+
+        def _calc_canvas(ratio: str) -> tuple[int, int]:
+            """비율 문자열 → (width, height) 픽셀."""
+            ratio_map = {
+                "1:1": (1024, 1024),
+                "4:5": (1024, 1280),
+                "9:16": (720, 1280),
+            }
+            return ratio_map.get(ratio, (1024, 1024))
+
+        async def _thumb_generate() -> None:
+            main_copy = thumb_main_input.value.strip()
+            if not main_copy:
+                ui.notify("메인 카피를 입력해주세요.", type="warning")
+                return
+
+            thumb_gen_btn.props("disabled loading")
+            thumb_spinner.classes(remove="hidden")
+            thumb_status.classes(remove="hidden")
+            thumb_status.set_text("Gemini 이미지 생성 중...")
+
+            try:
+                from app.ai.image_provider import GeminiImageProvider
+                from app.ai.nanobanana_prompt import compose_style_fusion_prompt, compose_image_mapping_prompt
+
+                ratio = thumb_ratio_sel.value or "1:1"
+                mode = thumb_mode_sel.value or "style_fusion"
+                w, h = _calc_canvas(ratio)
+                sub_copy = thumb_sub_input.value.strip() or ""
+                cta_copy = thumb_cta_input.value.strip() or "자세히 보기"
+                visual = thumb_visual_input.value.strip() or "clean, modern, bright"
+
+                if mode == "style_fusion":
+                    prompt = compose_style_fusion_prompt(w, h, ratio, visual, main_copy, sub_copy, cta_copy)
+                else:
+                    prompt = compose_image_mapping_prompt(
+                        w, h, ratio,
+                        product_desc=main_copy,
+                        benchmark_desc=visual,
+                        visual_guide=visual,
+                        main=main_copy,
+                        sub=sub_copy,
+                        cta=cta_copy,
+                    )
+
+                provider = GeminiImageProvider()
+                images = _thumb_state["ref_images"] if _thumb_state["ref_images"] else None
+                loop = asyncio.get_event_loop()
+                pil_img = await loop.run_in_executor(
+                    None,
+                    lambda: provider.generate_image(prompt, images, aspect_ratio=ratio),
+                )
+
+                # PIL → bytes for preview and save
+                import io
+                import base64
+                buf = io.BytesIO()
+                pil_img.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+                _thumb_state["result_bytes"] = img_bytes
+
+                b64 = base64.b64encode(img_bytes).decode()
+                thumb_result_container.clear()
+                with thumb_result_container:
+                    ui.image(f"data:image/png;base64,{b64}").classes(
+                        "max-w-lg rounded shadow"
+                    )
+                    ui.label(f"{len(img_bytes):,} bytes | {w}x{h}").classes(
+                        "text-xs text-gray-400"
+                    )
+
+                thumb_save_btn.classes(remove="hidden")
+                thumb_status.set_text("생성 완료!")
+                ui.notify("썸네일 생성 완료!", type="positive", timeout=5000)
+
+            except Exception as exc:
+                thumb_status.set_text("생성 실패")
+                ui.notify(f"썸네일 생성 오류: {exc}", type="negative", timeout=8000)
+            finally:
+                thumb_gen_btn.props(remove="disabled loading")
+                thumb_spinner.classes("hidden")
+
+        def _thumb_save() -> None:
+            from datetime import datetime
+            img_bytes = _thumb_state.get("result_bytes")
+            if not img_bytes:
+                ui.notify("먼저 썸네일을 생성해주세요.", type="warning")
+                return
+            from app.paths import THUMBNAILS_DIR, sanitize_filename
+            pid = nicegui_app.storage.user.get("current_project_id")
+            project = get_project(pid) if pid else None
+            base = sanitize_filename(project.get("name", "thumbnail")) if project else "thumbnail"
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{base}_{ts}.png"
+            ExportManager.save_default(img_bytes, filename, dest_dir=THUMBNAILS_DIR)
+
         # ── Diagnostic panels ─────────────────────────────────────────────
         create_log_panel()
         create_path_info_panel()
