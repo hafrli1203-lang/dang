@@ -189,10 +189,9 @@ class TestGeminiProvider(unittest.TestCase):
         result = provider.generate_text("기획서 작성해줘")
 
         self.assertEqual(result, "Gemini가 작성한 기획서입니다.")
-        mock_client.models.generate_content.assert_called_once_with(
-            model=provider._model,
-            contents="기획서 작성해줘",
-        )
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        self.assertEqual(call_kwargs["model"], provider._model)
+        self.assertEqual(call_kwargs["contents"], "기획서 작성해줘")
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "key", "GEMINI_MODEL": "gemini-2.0-flash"})
     @patch("google.genai.Client")
@@ -232,8 +231,8 @@ class TestGeminiProvider(unittest.TestCase):
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
     @patch("google.genai.Client")
-    def test_no_config_when_no_system_prompt(self, mock_client_cls):
-        """When system_prompt is None, config should not be in API call."""
+    def test_config_present_without_system_prompt(self, mock_client_cls):
+        """When system_prompt is None, config should still be present (max_output_tokens)."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_response = MagicMock()
@@ -245,7 +244,7 @@ class TestGeminiProvider(unittest.TestCase):
         provider.generate_text("prompt")
 
         call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertNotIn("config", call_kwargs)
+        self.assertIn("config", call_kwargs)
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
     @patch("google.genai.Client")
@@ -260,6 +259,197 @@ class TestGeminiProvider(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             provider.generate_text("prompt")
         self.assertIn("Gemini API 호출 실패", str(ctx.exception))
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_empty_response_raises_valueerror(self, mock_client_cls):
+        """Empty/None response.text should raise ValueError with clear message."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.text = ""
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        with self.assertRaises(ValueError) as ctx:
+            provider.generate_text("prompt")
+        self.assertIn("비어 있습니다", str(ctx.exception))
+
+
+@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
+class TestGeminiStability(unittest.TestCase):
+    """Gemini 안정화 관련 테스트."""
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_gemini_max_output_tokens_in_config(self, mock_client_cls):
+        """generate_text() should include max_output_tokens=4096 in config."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.text = "result"
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        provider.generate_text("prompt", system_prompt="guide")
+
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        config = call_kwargs["config"]
+        self.assertEqual(config.max_output_tokens, 4096)
+
+    def test_gemini_import_error_message(self):
+        """google-genai 미설치 시 친절한 ImportError 메시지를 보여줘야 한다."""
+        import sys
+        # Temporarily hide google.genai
+        saved = {}
+        for key in list(sys.modules.keys()):
+            if key == "google" or key.startswith("google."):
+                saved[key] = sys.modules.pop(key)
+        # Also block the import
+        import importlib
+        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "google" or name.startswith("google."):
+                raise ImportError("No module named 'google'")
+            return original_import(name, *args, **kwargs)
+
+        try:
+            import builtins
+            old_import = builtins.__import__
+            builtins.__import__ = mock_import
+            # Remove cached module
+            sys.modules.pop("app.ai.providers", None)
+
+            with self.assertRaises(ImportError) as ctx:
+                # Force re-import of GeminiProvider
+                from importlib import reload
+                import app.ai.providers as pmod
+                reload(pmod)
+                pmod.GeminiProvider(api_key="test-key")
+            self.assertIn("google-genai", str(ctx.exception))
+            self.assertIn("pip install", str(ctx.exception))
+        finally:
+            builtins.__import__ = old_import
+            sys.modules.update(saved)
+            # Re-import to restore module state
+            sys.modules.pop("app.ai.providers", None)
+
+
+@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
+class TestGeminiImageGeneration(unittest.TestCase):
+    """GeminiProvider.generate_image tests with mocked google-genai SDK."""
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_generate_image_text_only(self, mock_client_cls):
+        """Text-only prompt should produce (bytes, mime_type) tuple."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_part = MagicMock()
+        mock_part.inline_data = MagicMock()
+        mock_part.inline_data.data = b"\x89PNG_FAKE"
+        mock_part.inline_data.mime_type = "image/png"
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [mock_part]
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        data, mime = provider.generate_image("당근마켓 광고 썸네일")
+
+        self.assertEqual(data, b"\x89PNG_FAKE")
+        self.assertEqual(mime, "image/png")
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        self.assertEqual(len(call_kwargs["contents"]), 1)  # text only
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_generate_image_with_reference(self, mock_client_cls):
+        """reference_image should add a Part to contents."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_part = MagicMock()
+        mock_part.inline_data = MagicMock()
+        mock_part.inline_data.data = b"IMG"
+        mock_part.inline_data.mime_type = "image/png"
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [mock_part]
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        provider.generate_image("prompt", reference_image=b"REF_IMG", reference_mime="image/jpeg")
+
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        self.assertEqual(len(call_kwargs["contents"]), 2)  # Part + text
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_no_image_in_response(self, mock_client_cls):
+        """Should raise ValueError when response has no inline_data."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_part = MagicMock()
+        mock_part.inline_data = None  # no image
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [mock_part]
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        with self.assertRaises(ValueError) as ctx:
+            provider.generate_image("prompt")
+        self.assertIn("이미지가 포함되지 않았습니다", str(ctx.exception))
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "key", "GEMINI_IMAGE_MODEL": "gemini-custom-image"})
+    @patch("google.genai.Client")
+    def test_respects_image_model_env_var(self, mock_client_cls):
+        """Should use GEMINI_IMAGE_MODEL env var when set."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        mock_part = MagicMock()
+        mock_part.inline_data = MagicMock()
+        mock_part.inline_data.data = b"IMG"
+        mock_part.inline_data.mime_type = "image/png"
+        mock_candidate = MagicMock()
+        mock_candidate.content.parts = [mock_part]
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="key")
+        provider.generate_image("prompt")
+
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        self.assertEqual(call_kwargs["model"], "gemini-custom-image")
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
+    @patch("google.genai.Client")
+    def test_api_error_wrapped(self, mock_client_cls):
+        """SDK exceptions should be wrapped as ValueError."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.models.generate_content.side_effect = RuntimeError("network error")
+
+        from app.ai.providers import GeminiProvider
+        provider = GeminiProvider(api_key="test-gemini-key")
+        with self.assertRaises(ValueError) as ctx:
+            provider.generate_image("prompt")
+        self.assertIn("Gemini 이미지 생성 실패", str(ctx.exception))
 
 
 class TestGetProvider(unittest.TestCase):
