@@ -12,7 +12,7 @@ from app.database import (
     get_latest_content,
     save_generated_content,
 )
-from app.ai_engine import build_planning_prompt, SYSTEM_GUIDE_PLANNING
+from app.ai_engine import build_planning_prompt, SYSTEM_GUIDE_PLANNING, CATEGORIES, validate_planning_output, build_repair_prompt
 from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
 from app.reporting.docx_report import build_planning_docx
 
@@ -68,13 +68,36 @@ def planning_page() -> None:
         # ── Options row ────────────────────────────────────────────────────
         with ui.card().classes("w-full"):
             ui.label("생성 옵션").classes("font-bold text-gray-700 mb-2")
-            with ui.row().classes("items-start gap-8"):
+            with ui.row().classes("items-start gap-8 flex-wrap"):
                 with ui.column().classes("gap-1"):
                     ui.label("AI 엔진").classes("text-sm font-medium text-gray-500")
                     engine_radio = ui.radio(
                         {"claude": "Claude", "gemini": "Gemini", "both": "둘 다 (비교)"},
                         value="claude",
                     ).props("inline")
+
+                with ui.column().classes("gap-1"):
+                    ui.label("프롬프트 카테고리").classes("text-sm font-medium text-gray-500")
+                    cat_options = {cid: cat["label"] for cid, cat in CATEGORIES.items()}
+                    category_sel = ui.select(
+                        cat_options,
+                        label="카테고리 선택",
+                        value="default",
+                    ).classes("w-72")
+
+                    # 전략 선택 (restaurant일 때만 표시)
+                    strategy_options = {"A": "A: 진정성/스토리", "B": "B: 긴급성/한정", "C": "C: 가성비/구성"}
+                    strategy_sel = ui.select(
+                        strategy_options,
+                        label="전략 선택",
+                        value="A",
+                    ).classes("w-72")
+                    strategy_sel.set_visibility(False)
+
+                    def _on_category_change(e) -> None:
+                        strategy_sel.set_visibility(e.value == "restaurant")
+
+                    category_sel.on("update:model-value", _on_category_change)
 
                 with ui.column().classes("flex-1 gap-1"):
                     ui.label("추가 요청 사항 (선택)").classes(
@@ -145,6 +168,8 @@ def planning_page() -> None:
 
             engine = engine_radio.value
             extra = extra_input.value
+            cat = category_sel.value or "default"
+            strat = strategy_sel.value or "A"
 
             _plan_state["cancelled"] = False
             spinner.classes(remove="hidden")
@@ -153,9 +178,10 @@ def planning_page() -> None:
 
             try:
                 _set_step("1/3 프롬프트 생성 중...")
-                prompt = build_planning_prompt(project, extra)
+                guide, prompt = build_planning_prompt(
+                    project, extra, category=cat, strategy=strat,
+                )
                 loop = asyncio.get_event_loop()
-                guide = SYSTEM_GUIDE_PLANNING
 
                 if _plan_state["cancelled"]:
                     ui.notify("생성이 중단되었습니다.", type="warning")
@@ -183,6 +209,36 @@ def planning_page() -> None:
                     if _plan_state["cancelled"]:
                         ui.notify("생성이 중단되었습니다.", type="warning")
                         return
+
+                # ── 소식글 검증 + 자동 보정 (default 카테고리만) ──
+                if cat == "default":
+                    validation_missing = validate_planning_output(content)
+                    if validation_missing:
+                        _set_step("검증 실패 — 자동 보정 중...")
+                        repair_prompt = build_repair_prompt(content, validation_missing)
+                        try:
+                            if engine == "both":
+                                # both인 경우 Claude 결과만 보정
+                                repaired = await loop.run_in_executor(
+                                    None, lambda: ClaudeProvider().generate_text(repair_prompt, system_prompt=guide),
+                                )
+                            else:
+                                repair_provider = get_provider(engine)
+                                repaired = await loop.run_in_executor(
+                                    None, lambda: repair_provider.generate_text(repair_prompt, system_prompt=guide),
+                                )
+                            # 2차 검증
+                            second_check = validate_planning_output(repaired)
+                            if not second_check:
+                                content = repaired
+                            else:
+                                # 2회째도 실패 — 원본 유지 + 경고
+                                ui.notify(
+                                    f"자동 보정 후에도 미달 항목 {len(second_check)}건. 원본 사용.",
+                                    type="warning", timeout=8000,
+                                )
+                        except Exception as repair_exc:
+                            ui.notify(f"자동 보정 실패: {repair_exc}", type="warning", timeout=6000)
 
                 _set_step("3/3 결과 저장 중...")
                 _state["content"] = content
