@@ -1639,3 +1639,106 @@ def build_planning_docx(
 
     doc.save(output_path)
     return output_path
+
+
+def build_proposal_docx(
+    shop_info: dict,
+    sections: dict[str, str],
+    output_path: Path,
+    kpi: dict | None = None,
+) -> Path:
+    """광고 운영 제안서 DOCX 생성 → output_path 반환.
+
+    Document structure:
+      표지 (점포명 + 날짜)
+      ── page break ──
+      7개 섹션 (Heading 1 + 본문)
+      KPI 테이블 (섹션 2에 삽입, kpi 전달 시)
+    """
+    from app.ai_engine import _PROPOSAL_SECTION_NAMES, _PROPOSAL_SECTION_KEYS
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+    _apply_document_defaults(doc)
+
+    shop_name = shop_info.get("shop_name", "광고주")
+    industry = shop_info.get("industry", "")
+    location = shop_info.get("location", "")
+
+    _add_footer(doc, f"{shop_name}  |  광고 운영 제안서")
+
+    # ── 표지 ──
+    for _ in range(4):
+        doc.add_paragraph()
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title_p.add_run("광고 운영 제안서")
+    run.font.size = Pt(28)
+    run.font.color.rgb = RGBColor(0x36, 0x5F, 0x91)
+    run.bold = True
+
+    subtitle_p = doc.add_paragraph()
+    subtitle_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = subtitle_p.add_run(shop_name)
+    run.font.size = Pt(18)
+    run.font.color.rgb = RGBColor(0x4F, 0x81, 0xBD)
+
+    if industry or location:
+        info_p = doc.add_paragraph()
+        info_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        info_text = " | ".join(filter(None, [industry, location]))
+        run = info_p.add_run(info_text)
+        run.font.size = Pt(12)
+        run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+    date_p = doc.add_paragraph()
+    date_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = date_p.add_run(datetime.now().strftime("%Y년 %m월 %d일"))
+    run.font.size = Pt(11)
+    run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+    doc.add_page_break()
+
+    # ── 7개 섹션 ──
+    for idx, key in enumerate(_PROPOSAL_SECTION_KEYS):
+        section_name = _PROPOSAL_SECTION_NAMES[key]
+        section_num = idx + 1
+        doc.add_heading(f"{section_num}. {section_name}", level=1)
+
+        # KPI 테이블 삽입 (섹션 2: 이전 캠페인 성과 요약)
+        if key == "prev_performance" and kpi:
+            kpi_items = [
+                ("총 비용", f"{kpi.get('total_cost', 0):,}원"),
+                ("총 노출", f"{kpi.get('total_impressions', 0):,}회"),
+                ("총 클릭", f"{kpi.get('total_clicks', 0):,}회"),
+                ("CTR (클릭률)", f"{kpi.get('ctr', 0):.2f}%"),
+                ("CPC (클릭당 비용)", f"{kpi.get('cpc', 0):,.0f}원"),
+                ("총 문의", f"{kpi.get('total_inquiries', 0):,}건"),
+                ("CPA (문의당 비용)", f"{kpi.get('cpa', 0):,.0f}원"),
+                ("단골 전환", f"{kpi.get('total_regulars', 0):,}명"),
+            ]
+            table = doc.add_table(rows=len(kpi_items) + 1, cols=2, style="Table Grid")
+            # Header row
+            hdr = table.rows[0]
+            hdr.cells[0].text = "지표"
+            hdr.cells[1].text = "값"
+            for cell in hdr.cells:
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        r.bold = True
+                _set_cell_bg(cell, "FFF3E0")
+            for i, (label, val) in enumerate(kpi_items):
+                table.rows[i + 1].cells[0].text = label
+                table.rows[i + 1].cells[1].text = val
+            doc.add_paragraph()  # spacing
+
+        body = sections.get(key, "")
+        if body.strip():
+            _render_md_body(doc, body)
+        else:
+            doc.add_paragraph("(내용 없음)")
+
+    doc.save(output_path)
+    return output_path

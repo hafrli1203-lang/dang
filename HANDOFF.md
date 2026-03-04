@@ -30,7 +30,16 @@ daangn_ad_reporter/
     │   ├── providers.py         # BaseProvider / ClaudeProvider / GeminiProvider
     │   │                        #   generate_text(prompt, *, system_prompt=None)
     │   │                        #   Claude: system 파라미터 / Gemini: system_instruction
-    │   └── test_providers.py    # providers 모킹 테스트 (15개)
+    │   ├── news_post_guard.py   # 소식글 검증 (의심해소/가성비) — default 카테고리
+    │   ├── image_provider.py    # GeminiImageProvider (Nano Banana 썸네일) + get_image_failure_guide()
+    │   ├── nanobanana_prompt.py # Style Fusion / Image Mapping 프롬프트
+    │   ├── text_overlay.py     # PIL 텍스트 오버레이 (한국어 폰트 + 그림자 + CTA 배지)
+    │   └── test_providers.py    # providers 모킹 테스트 (35개)
+    │
+    ├── content/                 # 콘텐츠 검증 모듈
+    │   ├── __init__.py
+    │   ├── news_post_rules.py   # 소식글 검증 (Type B/C) — restaurant 카테고리
+    │   └── test_news_post_rules.py  # 18개 테스트
     │
     ├── reporting/               # 독립 보고서 DOCX 모듈
     │   ├── __init__.py
@@ -44,8 +53,9 @@ daangn_ad_reporter/
     │
     └── pages/
         ├── project.py           # 화면 1: 프로젝트 관리
-        ├── planning.py          # 화면 2: 광고 기획 (+ SYSTEM_GUIDE_PLANNING)
-        └── report.py            # 화면 3: 성과 보고서 (+ SYSTEM_GUIDE_REPORT)
+        ├── planning.py          # 화면 2: 광고 기획 (+ SYSTEM_GUIDE_PLANNING + 썸네일 패널)
+        ├── report.py            # 화면 3: 성과 보고서 (+ SYSTEM_GUIDE_REPORT)
+        └── thumbnail.py         # 화면 4: 썸네일 이미지 생성 (Gemini + 히스토리)
 ```
 
 ---
@@ -207,7 +217,7 @@ print('OK')
 - [x] `updater.py` 모킹 테스트 추가 — `app/test_updater.py` (8 tests).
 - [x] `_annotate_bars()` 버그 수정 — callable fmt 지원 추가.
 - [x] `_save_chart()` MemoryError 핸들링 — bbox_inches="tight" 실패 시 fallback.
-- [x] **전체 38/38 테스트 통과** (docx 19 + providers 11 + updater 8).
+- [x] **전체 133/133 테스트 통과** (docx 19 + providers 35 + guard 34 + rules 18 + parsers 9 + paths 13 + updater 8).
 
 ### 남은 TODO
 - [x] `app/updater.py`의 `GITHUB_REPO` 변수에 실제 저장소 경로 설정 → `hafrli1203-lang/dang`
@@ -294,7 +304,7 @@ verify_reports.py:
 | 용도 | env var | 기본값 |
 |------|---------|--------|
 | 텍스트 생성 | `GEMINI_MODEL` | `gemini-3.1-pro-preview` |
-| providers.py 이미지 | `GEMINI_IMAGE_MODEL` | `gemini-2.0-flash-preview-image-generation` |
+| providers.py 이미지 | `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` |
 | image_provider.py 썸네일 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` (Nano Banana) |
 
 ### 테스트 결과
@@ -309,21 +319,440 @@ updater:       8/8  OK
 
 ### 남은 TODO
 
-**P0-1: 업로드/에러 안정화**
-- [ ] CSV/XLSX 업로드 시 인코딩 자동 감지 개선 (cp949 이외 EUC-KR 등)
-- [ ] 대용량 파일 업로드 시 프로그레스 표시
-- [ ] AI API 타임아웃/네트워크 오류 시 재시도 UX
+**P0-1: 업로드/에러 안정화** — 모두 완료
+- [x] CSV/XLSX 업로드 시 인코딩 자동 감지 개선 (cp949 이외 EUC-KR 등) → euc-kr, utf-16 추가 + charset-normalizer fallback
+- [x] 대용량 파일 업로드 시 프로그레스 표시 → spinner + max_file_size=50MB + run_in_executor
+- [x] AI API 타임아웃/네트워크 오류 시 재시도 UX → `retry_api_call()` 유틸리티 (지수 백오프 + Retry-After 파싱)
 
-**P1: 소식글 강제 출력 포맷**
-- [ ] 검증 실패 시 사용자에게 누락 항목 시각적 표시 (현재 로그만)
-- [ ] 자동 보정 2회 이상 재시도 옵션
-- [ ] 카테고리별 검증 규칙 분리 (현재 default만 검증)
+**P1: 소식글 강제 출력 포맷** — 모두 완료
+- [x] 검증 실패 시 사용자에게 누락 항목 시각적 표시 → 검증 배너 (초록/빨강) + ui.notify
+- [x] 자동 보정 2회 이상 재시도 옵션 → "재보정 시도" 버튼 (수동 재시도, default + restaurant 모두 지원)
+- [x] 카테고리별 검증 규칙 분리 → default(news_post_guard) + restaurant(news_post_rules)
 
-**P1: Gemini 안정화**
-- [ ] Gemini API rate limit 대응 (429 → 자동 대기/재시도)
-- [ ] 이미지 생성 실패 시 프롬프트 가이드라인 자동 제안
+**P1: Gemini 안정화** — 모두 완료
+- [x] Gemini API rate limit 대응 (429 → 자동 대기/재시도) → `retry_api_call()` + `_is_transient()` + `_parse_retry_after()`
+- [x] 이미지 생성 실패 시 프롬프트 가이드라인 자동 제안 → `get_image_failure_guide()` (safety/empty/rate/timeout/server 분류)
 
-**P2: Nano Banana 썸네일**
-- [ ] 생성된 이미지 히스토리 관리 (세션 내 되돌리기)
-- [ ] 텍스트 오버레이 후처리 (PIL/Pillow로 카피 합성)
-- [ ] 다중 비율 동시 생성 (1:1 + 4:5 + 9:16 한번에)
+**P2: Nano Banana 썸네일** — 모두 완료
+- [x] 생성된 이미지 히스토리 관리 (세션 내 되돌리기) → 최대 10장, 클릭으로 복원 (planning + thumbnail 페이지)
+- [x] 텍스트 오버레이 후처리 (PIL/Pillow로 카피 합성) → `app/ai/text_overlay.py` (한국어 폰트 + 그림자 + CTA 배지)
+- [x] 다중 비율 동시 생성 (1:1 + 4:5 + 9:16 한번에) → multi-select UI + 순차 생성 + 그리드 표시
+
+---
+
+## 2026-03-04: Commit 3 — 소식글 강제 출력 + 검증/리페어 루프
+
+### 완료 항목
+
+**Commit 3-1 ~ 3-4 (이전 세션)**
+- `app/ai/news_post_guard.py` — FORCED_TEMPLATE, validate_news_post(), build_news_post_repair_prompt()
+- `app/ai_engine.py` — build_planning_prompt()에서 format_forced_template() 호출
+- `app/pages/planning.py` — 검증 + 자동 보정 루프 (최대 2회 retry)
+- `app/ai/test_news_post_guard.py` — 15개 기본 테스트
+
+**Commit 3-5: UI 표시 개선 + "both" 엔진 버그 수정**
+- 탭 UI: 전체 보기 / 소식글 1 (의심해소) / 소식글 2 (가성비) 탭 분리
+- 복사 버튼: 각 소식글 탭에 클립보드 복사 버튼 (`navigator.clipboard.writeText`)
+- 검증 배너: 상단에 초록(통과) / 빨강(미달 N건) 배너 표시
+- "both" 버그 수정: `engine == "both"` 시 검증 건너뛰기 (비교 용도)
+- 파싱 헬퍼: `_parse_planning_sections()` — 의심해소/가성비/기획요약/카피 분리
+
+**Commit 3-6: 테스트 보강 (15 → 25개)**
+- `TestSplitBlocks` (3개): 정상 분리, 빈 입력, 단일 블록
+- `TestExtractBodyText` (3개): FAQ/고지 제거, CTA 제거, 제목 제거
+- `TestValidateNewsPost` 추가 (4개): 금지어 "전부"/"절대 추가금 없음", 제목 누락, 줄바꿈 부족
+
+### 변경 파일
+
+| 파일 | 변경 |
+|------|------|
+| `app/pages/planning.py` | 탭 UI, 복사, 검증 배너, "both" 버그 수정 |
+| `app/ai/test_news_post_guard.py` | 10개 테스트 추가 |
+| `HANDOFF.md` | Commit 3 섹션 추가 |
+
+### 검증 결과
+```
+전체 테스트: 102/102 OK
+  news_post_guard: 29/29
+  providers:       26/26
+  docx_report:     19/19
+  parsers:          8/8
+  paths:           13/13 (5 skipped)
+  updater:          8/8 (1 skipped)
+
+통합 스모크 테스트:
+  format_forced_template: OK (placeholder 치환)
+  _parse_planning_sections: OK (양쪽 버전 + 빈 입력)
+  validate_news_post: OK (금지어 4종 감지)
+```
+
+### 알려진 이슈 (해결됨)
+- ~~`news_post_guard.py` 내부 repair 루프의 `if engine == "both"` 분기가 dead code~~ → 제거됨
+- ~~저장된 콘텐츠 로드 시 검증 배너 미표시~~ → 저장 콘텐츠 로드 시 재검증 추가
+
+---
+
+## 2026-03-04: Commit 3-7 — Type B/C 검증기 통합 (restaurant 카테고리)
+
+### 개요
+
+`restaurant` 카테고리(오프라인 음식점)에 Type B(긴급성) / Type C(가성비) 소식글 검증 + 자동 보정 루프를 연결.
+
+### 신규 파일
+
+| 파일 | 설명 |
+|------|------|
+| `app/content/__init__.py` | 콘텐츠 검증 패키지 |
+| `app/content/news_post_rules.py` | Type B/C 검증기 — `validate_news_post()`, `build_news_repair_prompt()` |
+| `app/content/test_news_post_rules.py` | 18개 테스트 (pass/fail/split/repair) |
+
+### 변경 파일
+
+| 파일 | 변경 |
+|------|------|
+| `app/pages/planning.py` | Type B/C 검증 import + restaurant 카테고리 검증/보정 루프 + 저장 콘텐츠 자동 감지 |
+
+### 검증 규칙 (news_post_rules.py)
+
+- `[소식글 Type C(가성비)]` + `[소식글 Type B(긴급성)]` 헤더 필수
+- 각 블록: 제목/본문/CTA/FAQ/고지 하위 섹션 필수
+- 본문 최소 900자, CTA 키워드(채팅/문의/쿠폰/단골/예약) 포함
+- FAQ 최소 3쌍 (Q1-A1, Q2-A2, Q3-A3)
+- 금지어: "무조건", "전부", "절대 추가금 없음", "100%"
+
+### 검증 분기 로직
+
+| 카테고리 | 엔진 | 검증기 | 동작 |
+|----------|------|--------|------|
+| `default` | claude/gemini | `news_post_guard` | 의심해소 + 가성비 검증 |
+| `restaurant` | claude/gemini | `news_post_rules` | Type B + Type C 검증 |
+| any | `both` | — | 검증 건너뛰기 (비교 용도) |
+| 기타 | any | — | 검증 없음 |
+
+저장 콘텐츠 로드 시: `[소식글 Type B/C` 헤더 감지 → `news_post_rules`, 그 외 → `news_post_guard`
+
+### 검증 결과
+```
+전체 테스트: 125/125 OK
+  news_post_guard:  34/34
+  news_post_rules:  18/18
+  providers:        26/26
+  docx_report:      19/19
+  parsers:           8/8
+  paths:            13/13
+  updater:           8/8 (1 skipped)
+```
+
+### 다음 커밋
+- ~~**Commit 4**: Gemini 텍스트 연동 강화~~ (완료)
+- ~~**Commit 5**: 나노바나나 썸네일 플로우~~ (완료)
+
+---
+
+## 2026-03-04: 광고 운영 제안서 생성기 + 스트리밍 (커밋 1~5)
+
+### 개요
+
+7섹션 구조의 전문 광고 운영 제안서를 AI로 자동 생성하는 기능 추가.
+Claude/Gemini 스트리밍 지원, 섹션별 재생성/편집, DOCX 내보내기 포함.
+
+### 커밋 1: Proposal Prompt Engine (`ai_engine.py`)
+
+**추가된 상수/함수:**
+
+| 항목 | 설명 |
+|------|------|
+| `SYSTEM_GUIDE_PROPOSAL` | 7섹션 구조 시스템 가이드 (system 메시지 전용) |
+| `_PROPOSAL_PROMPT` | 제안서 생성 프롬프트 템플릿 |
+| `_PROPOSAL_SECTION_NAMES` | 7개 섹션 한국어 이름 dict |
+| `_PROPOSAL_SECTION_KEYS` | 7개 섹션 키 리스트 (순서 보장) |
+| `build_proposal_prompt()` | (shop_info, promo_text, target_age, prev_csv_rows, prev_summary) → (system, user) 튜플 |
+| `parse_proposal_sections()` | 마크다운 → {section_key: section_text} dict (7개 키) |
+| `build_proposal_section_prompt()` | 단일 섹션 재생성 프롬프트 |
+
+**7섹션 구조:**
+1. 요약 (summary)
+2. 이전 캠페인 성과 분석 (prev_performance)
+3. 병목 진단 (bottleneck)
+4. KPI 목표 (kpi_goals)
+5. 전략 제안 (strategy)
+6. 집행 설계 (execution)
+7. 소재/소식글 방향 (creative)
+
+**이전 성과 데이터 처리:**
+- CSV rows 전달 시: `calc_kpi()` → KPI 테이블 자동 주입
+- prev_summary만 전달 시: 텍스트 그대로 주입
+- 둘 다 없으면: "신규 캠페인 — 이전 집행 데이터 없음" 폴백
+
+### 커밋 2: DB content_type 필터 + Proposal DOCX
+
+**`database.py` 변경:**
+
+```python
+# 기존 함수에 content_type 파라미터 추가 (기본값: "planning" → 하위호환)
+save_generated_content(project_id, engine, content, content_type="planning")
+get_latest_content(project_id, content_type="planning")
+
+# 마이그레이션 (init_db)
+ALTER TABLE generated_content ADD COLUMN content_type TEXT DEFAULT 'planning'
+```
+
+- `content_type="proposal"` 로 저장/조회하면 planning 콘텐츠와 분리
+- 기존 코드는 기본값 "planning"으로 변경 없이 동작
+
+**`docx_report.py` 추가:**
+
+```python
+def build_proposal_docx(
+    shop_info: dict,          # shop_name, industry, location
+    sections: dict[str, str], # parse_proposal_sections() 결과
+    output_path: Path,
+    kpi: dict | None = None,  # calc_kpi() 결과 (선택)
+) -> Path:
+```
+
+- 표지: 점포명 + 업종 + 위치 + 생성일
+- 7개 섹션을 Heading 1 + 본문으로 렌더링
+- KPI 데이터 전달 시 섹션 2에 테이블 삽입
+
+### 커밋 3: Planning 페이지 탭 구조
+
+**`planning.py` 변경:**
+
+```
+/planning 페이지 구조:
+├── 프로젝트 선택 바 (기존)
+├── ui.tabs
+│   ├── "소식글 기획" 탭 → 기존 코드 전체 (inline 래핑)
+│   └── "운영 제안서" 탭 → proposal_tab.build_proposal_tab()
+└── 진단 패널 (기존)
+```
+
+- 기존 소식글 코드를 `with ui.tab_panel(tab_news):` 안에 그대로 래핑
+- 로직 변경 없음 — 순수 구조적 래핑만 적용
+- `proposal_tab.py`는 lazy import
+
+### 커밋 4: Proposal Tab UI (`proposal_tab.py`)
+
+**파일: `app/pages/proposal_tab.py` (~512줄)**
+
+```
+build_proposal_tab()
+├── 입력 폼
+│   ├── 점포명 / 업종 / 위치 (프로젝트에서 자동 채움)
+│   ├── 프로모션/상품 정보 (textarea)
+│   ├── 타겟 연령대 (select: 전연령~60대 이상)
+│   ├── CSV 업로드 → parse_daangn_csv() 자동 파싱
+│   └── 수동 요약 (CSV 없을 때)
+├── AI 엔진 선택 (claude / gemini / both)
+├── "제안서 생성" 버튼
+│   ├── both: asyncio.gather로 Claude+Gemini 동시 호출
+│   └── 단일: queue.Queue + ui.timer(0.2) 스트리밍 브릿지
+├── 결과 표시
+│   ├── "전체 보기" 탭: 마크다운 전문
+│   └── "섹션별 보기" 탭: 7개 ui.expansion 패널
+│       ├── 편집 토글 (마크다운 ↔ textarea)
+│       ├── 편집 완료 → DB 자동 저장
+│       └── 재생성 버튼 → _regen_section()
+├── DOCX 내보내기
+│   ├── "기본 폴더에 저장" → ExportManager.save_default()
+│   └── "다른 위치로 저장" → ExportManager.save_as()
+└── DB 저장/로드 (content_type="proposal")
+```
+
+**핵심 패턴:**
+- `run_in_executor`로 동기 provider 호출을 async 래핑
+- `_render_sections(container, state, full_md, gen_btn, progress_label, regen_fn)` — 외부 함수
+- 저장된 콘텐츠 로드는 모든 핸들러 정의 후 실행 (closure 안정성)
+
+### 커밋 5: 스트리밍 강화 (`providers.py` + `proposal_tab.py`)
+
+**`providers.py` 추가:**
+
+```python
+class BaseProvider:
+    def generate_text_stream(self, prompt, *, system_prompt=None):
+        """NON-abstract. 기본: generate_text() 결과를 단일 chunk로 yield."""
+        yield self.generate_text(prompt, system_prompt=system_prompt)
+
+class ClaudeProvider:
+    def generate_text_stream(self, prompt, *, system_prompt=None):
+        """SDK messages.stream() 사용."""
+        with self._client.messages.stream(**kwargs) as stream:
+            for text in stream.text_stream:
+                yield text
+
+class GeminiProvider:
+    def generate_text_stream(self, prompt, *, system_prompt=None):
+        """SDK generate_content_stream() 사용."""
+        for chunk in self._client.models.generate_content_stream(**kwargs):
+            if chunk.text:
+                yield chunk.text
+```
+
+- `generate_text()` 완전 불변 (기존 코드 영향 없음)
+- 스트리밍 미지원 provider는 자동 폴백 (단일 chunk yield)
+
+**스트리밍 브릿지 패턴 (`proposal_tab.py`):**
+
+```
+Background thread:                    UI thread:
+  provider.generate_text_stream()  →  queue.Queue  →  ui.timer(0.2)
+  chunk → queue.put(chunk)                             _poll_chunks()
+  None  → queue.put(None) sentinel                     stream_md.set_content()
+                                                       progress: "섹션 N/7"
+```
+
+- `queue.Queue` + `ui.timer(0.2)`로 NiceGUI 이벤트 루프와 동기화
+- 섹션 진행률 표시: `## ` 패턴 카운트 → "섹션 N/7 생성 중..."
+- 에러 전파: Exception 객체를 queue에 넣어 UI 스레드에서 re-raise
+
+### 변경 파일 요약
+
+| 파일 | 커밋 | 변경 |
+|------|------|------|
+| `app/ai_engine.py` | 1 | SYSTEM_GUIDE_PROPOSAL + 프롬프트 빌더 3개 |
+| `app/database.py` | 2 | content_type 파라미터 + ALTER TABLE 마이그레이션 |
+| `app/reporting/docx_report.py` | 2 | build_proposal_docx() 추가 (~100줄) |
+| `app/reporting/test_docx_report.py` | 2 | TestBuildProposalDocx 5개 테스트 |
+| `app/pages/planning.py` | 3 | 탭 구조 래핑 (소식글/제안서) |
+| `app/pages/proposal_tab.py` | 4,5 | **신규** — 전체 제안서 UI + 스트리밍 (~512줄) |
+| `app/ai/providers.py` | 5 | generate_text_stream() 3개 클래스 |
+| `app/ai/test_providers.py` | 5 | 스트리밍 테스트 5개 추가 |
+
+### 검증 결과
+
+```
+전체 테스트: 147/147 OK (21초)
+  providers:        31/31  (기존 26 + 스트리밍 5)
+  docx_report:      24/24  (기존 19 + 제안서 5)
+  news_post_guard:  34/34
+  news_post_rules:  18/18
+  parsers:           9/9
+  paths:            13/13
+  updater:           8/8
+  chart:             8/8
+```
+
+### 알려진 이슈
+
+| 이슈 | 심각도 | 상태 |
+|------|--------|------|
+| `.env`의 `GEMINI_IMAGE_MODEL=gemini-2.0-flash-preview-image-generation` 모델 404 | P1 | `.env`에서 해당 줄 삭제 또는 `gemini-2.5-flash-image`로 변경 필요 |
+| `_poll_chunks` 에러 시 timer 미해제 | P3 | 로깅은 추가됨, timer.deactivate() 추가 권장 |
+
+### 아키텍처 다이어그램 (최종)
+
+```
+main.py (entry)
+  ↓
+NiceGUI app (port 8080)
+  ├─ /project    → project.py
+  ├─ /planning   → planning.py
+  │    ├─ [소식글 기획] 탭
+  │    │    ├─ AI 생성 (Claude/Gemini/both)
+  │    │    ├─ 소식글 검증 (news_post_guard / news_post_rules)
+  │    │    ├─ 자동 보정 루프 (최대 2회)
+  │    │    └─ 썸네일 생성 (Nano Banana + text_overlay)
+  │    └─ [운영 제안서] 탭
+  │         └─ proposal_tab.py
+  │              ├─ 입력 → build_proposal_prompt()
+  │              ├─ generate_text_stream() → queue+timer 브릿지
+  │              ├─ parse_proposal_sections() → 7섹션 패널
+  │              ├─ 섹션별 편집/재생성
+  │              └─ build_proposal_docx() → ExportManager
+  ├─ /report     → report.py (CSV/XLSX → 성과보고서)
+  └─ /thumbnail  → thumbnail.py (Gemini 이미지)
+
+AI Layer
+  ├─ providers.py
+  │    ├─ ClaudeProvider  (generate_text + generate_text_stream)
+  │    ├─ GeminiProvider  (generate_text + generate_text_stream + generate_image)
+  │    └─ retry_api_call() (지수 백오프)
+  ├─ ai_engine.py (프롬프트 빌더 + KPI 계산)
+  ├─ image_provider.py (Nano Banana 썸네일)
+  └─ news_post_guard.py / news_post_rules.py (검증)
+
+Data Layer
+  ├─ database.py → SQLite (content_type 필터)
+  ├─ parsers.py → CSV 파서 (당근 광고 데이터)
+  └─ docx_report.py → DOCX 생성 (성과보고서 + 기획서 + 제안서)
+```
+
+---
+
+## 2026-03-04: TODO 전체 완료 — 안정화 + 썸네일 기능 강화
+
+### 개요
+
+HANDOFF.md의 남은 TODO 9건을 전부 구현 완료.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|------|------|
+| `app/reporting/parsers.py` | EUC-KR/UTF-16 인코딩 추가 + charset-normalizer fallback |
+| `app/reporting/test_parsers.py` | `test_euc_kr_csv_parses` 추가 (8→9개) |
+| `app/pages/report.py` | 업로드 spinner + max_file_size=50MB + run_in_executor |
+| `app/ai/providers.py` | `retry_api_call()`, `_is_transient()`, `_parse_retry_after()` 유틸리티 |
+| `app/ai/test_providers.py` | 9개 테스트 추가 (26→35개) + time.sleep 모킹 |
+| `app/ai/image_provider.py` | `retry_api_call()` 통합 + `get_image_failure_guide()` 함수 |
+| `app/ai/text_overlay.py` | **신규** — PIL 텍스트 오버레이 (한국어 폰트 + 그림자 + CTA 배지) |
+| `app/pages/planning.py` | 재보정 버튼 + 이미지 히스토리 + 텍스트 오버레이 체크박스 + 다중 비율 |
+| `app/pages/thumbnail.py` | 이미지 히스토리 + 실패 가이드 |
+| `HANDOFF.md` | TODO 항목 전체 완료 표시 |
+
+### 신규 기능 상세
+
+**1. CSV 인코딩 자동 감지** — `parsers.py`
+- 기존: utf-8-sig, cp949
+- 추가: euc-kr, utf-16 + charset-normalizer 라이브러리 fallback (선택 의존성)
+
+**2. 업로드 프로그레스** — `report.py`
+- `max_file_size=50_000_000` 제한
+- spinner + label 표시
+- CSV/XLSX 파싱을 `run_in_executor`로 비동기 처리
+
+**3. API 재시도 유틸리티** — `providers.py`
+- `retry_api_call(fn, max_retries=3, base_delay=2.0)` — 지수 백오프
+- `_is_transient(exc)` — 429/503/timeout/overloaded 분류
+- `_parse_retry_after(exc)` — Retry-After 헤더 파싱
+- ClaudeProvider, GeminiProvider (text+image), GeminiImageProvider 모두 통합
+
+**4. 검증 재보정 버튼** — `planning.py`
+- "재보정 시도" 버튼 (자동 보정 2회 후 수동 트리거)
+- default(news_post_guard) + restaurant(news_post_rules) 모두 지원
+
+**5. 이미지 실패 가이드** — `image_provider.py`
+- `get_image_failure_guide(error_msg)` — 에러 메시지 분류 후 한국어 안내
+- safety filter / empty response / rate limit / timeout / server overload 5종
+
+**6. 이미지 히스토리** — `planning.py` + `thumbnail.py`
+- 세션 내 최대 10장 저장
+- 스크롤 가능한 미니 썸네일 스트립
+- 클릭으로 이전 이미지 복원
+
+**7. PIL 텍스트 오버레이** — `text_overlay.py`
+- 한국어 폰트 자동 탐색 (Malgun Gothic / NanumGothic / AppleGothic)
+- 메인 텍스트 (상단 25%) + 서브 텍스트 (중앙 50%) + CTA 배지 (하단 82%)
+- 그림자 렌더링 + 반투명 CTA 배경 (alpha compositing)
+- planning.py 썸네일 패널에 체크박스 토글로 연동
+
+**8. 다중 비율 동시 생성** — `planning.py`
+- `thumb_ratio_sel` → `multiple=True` (멀티 선택)
+- 선택한 비율별 순차 생성 (rate limit 방지)
+- 그리드 레이아웃으로 결과 표시
+- 모든 결과 히스토리에 자동 저장
+
+### 검증 결과
+
+```
+전체 테스트: 133/133 OK (24초)
+  news_post_guard:  34/34
+  news_post_rules:  18/18
+  providers:        35/35
+  docx_report:      19/19
+  parsers:           9/9
+  paths:            13/13
+  updater:           8/8 (1 skipped)
+```

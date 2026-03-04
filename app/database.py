@@ -59,11 +59,12 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS generated_content (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                engine     TEXT NOT NULL,
-                content    TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now','localtime')),
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id   INTEGER NOT NULL,
+                engine       TEXT NOT NULL,
+                content      TEXT NOT NULL,
+                content_type TEXT DEFAULT 'planning',
+                created_at   TEXT DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
@@ -89,6 +90,11 @@ def init_db() -> None:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
         """)
+        # Migration for existing DBs: add content_type column if missing
+        try:
+            conn.execute("ALTER TABLE generated_content ADD COLUMN content_type TEXT DEFAULT 'planning'")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 # ── Projects ────────────────────────────────────────────────────────────────
@@ -137,21 +143,25 @@ def delete_project(project_id: int) -> None:
 
 # ── Generated Content ────────────────────────────────────────────────────────
 
-def save_generated_content(project_id: int, engine: str, content: str) -> int:
+def save_generated_content(
+    project_id: int, engine: str, content: str, content_type: str = "planning"
+) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO generated_content (project_id, engine, content) VALUES (?,?,?)",
-            (project_id, engine, content),
+            "INSERT INTO generated_content (project_id, engine, content, content_type) VALUES (?,?,?,?)",
+            (project_id, engine, content, content_type),
         )
         return cur.lastrowid
 
 
-def get_latest_content(project_id: int) -> Optional[Dict]:
+def get_latest_content(
+    project_id: int, content_type: str = "planning"
+) -> Optional[Dict]:
     with get_conn() as conn:
         row = conn.execute(
-            """SELECT * FROM generated_content WHERE project_id=?
+            """SELECT * FROM generated_content WHERE project_id=? AND content_type=?
                ORDER BY created_at DESC LIMIT 1""",
-            (project_id,),
+            (project_id, content_type),
         ).fetchone()
         return dict(row) if row else None
 

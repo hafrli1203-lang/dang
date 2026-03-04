@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.reporting.docx_report import build_planning_docx, build_report_docx, make_charts
+from app.reporting.docx_report import build_planning_docx, build_proposal_docx, build_report_docx, make_charts
 
 # ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -296,6 +296,83 @@ class TestMissingOrNoneFields(unittest.TestCase):
                 output_path=out,
             )
             self.assertTrue(out.exists())
+
+
+class TestBuildProposalDocx(unittest.TestCase):
+    """Tests for build_proposal_docx()."""
+
+    _SHOP = {"shop_name": "테스트안경", "industry": "안경점", "location": "부천시"}
+    _SECTIONS = {
+        "summary": "이번 달 요약 내용입니다.",
+        "prev_performance": "이전 성과 분석 내용.",
+        "bottleneck": "병목 진단 내용.",
+        "kpi_goals": "KPI 목표 설정.",
+        "strategy": "추천 전략 내용.",
+        "execution": "집행 설계 내용.",
+        "creative": "소재 제안 내용.",
+    }
+    _KPI = {
+        "total_cost": 300000, "total_impressions": 50000, "total_clicks": 2000,
+        "ctr": 4.0, "cpc": 150, "total_inquiries": 80, "cpa": 3750,
+        "total_regulars": 14, "total_coupons": 25,
+    }
+
+    def test_creates_valid_docx_with_7_sections(self):
+        from docx import Document as DocxDocument
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "proposal.docx"
+            result = build_proposal_docx(self._SHOP, self._SECTIONS, out)
+            self.assertTrue(result.exists())
+            self.assertEqual(result, out)
+            # Verify it's a valid docx by opening it
+            doc = DocxDocument(out)
+            headings = [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")]
+            section_headings = [h for h in headings if any(
+                name in h for name in ["요약", "성과", "병목", "KPI", "전략", "집행", "소재"]
+            )]
+            self.assertEqual(len(section_headings), 7)
+
+    def test_cover_contains_shop_name(self):
+        from docx import Document as DocxDocument
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "proposal.docx"
+            build_proposal_docx(self._SHOP, self._SECTIONS, out)
+            doc = DocxDocument(out)
+            all_text = " ".join(p.text for p in doc.paragraphs)
+            self.assertIn("테스트안경", all_text)
+            self.assertIn("광고 운영 제안서", all_text)
+
+    def test_kpi_table_included_when_data_provided(self):
+        from docx import Document as DocxDocument
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "proposal.docx"
+            build_proposal_docx(self._SHOP, self._SECTIONS, out, kpi=self._KPI)
+            doc = DocxDocument(out)
+            # Check that a table exists with KPI data
+            self.assertTrue(len(doc.tables) >= 1)
+            table_text = " ".join(
+                cell.text for table in doc.tables for row in table.rows for cell in row.cells
+            )
+            self.assertIn("CTR", table_text)
+            self.assertIn("총 비용", table_text)
+
+    def test_no_kpi_table_without_data(self):
+        from docx import Document as DocxDocument
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "proposal.docx"
+            build_proposal_docx(self._SHOP, self._SECTIONS, out, kpi=None)
+            doc = DocxDocument(out)
+            # No tables when no KPI data
+            self.assertEqual(len(doc.tables), 0)
+
+    def test_empty_sections_show_placeholder(self):
+        from docx import Document as DocxDocument
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "proposal.docx"
+            build_proposal_docx(self._SHOP, {}, out)
+            doc = DocxDocument(out)
+            all_text = " ".join(p.text for p in doc.paragraphs)
+            self.assertIn("(내용 없음)", all_text)
 
 
 if __name__ == "__main__":

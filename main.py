@@ -46,7 +46,7 @@ async def _startup_update_check() -> None:
     import asyncio
     from app.updater import check_for_update, show_update_notification
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     info = await loop.run_in_executor(None, check_for_update, __version__)
     if info:
         show_update_notification(ui, info)

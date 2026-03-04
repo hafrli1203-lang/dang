@@ -13,16 +13,82 @@ Environment variables (all optional — keys raise ValueError at call time if mi
     CLAUDE_MODEL        — model override  (default: claude-opus-4-6)
     GEMINI_API_KEY      — Google GenAI key
     GEMINI_MODEL        — model override  (default: gemini-3.1-pro-preview)
-    GEMINI_IMAGE_MODEL  — image generation model (default: gemini-2.0-flash-preview-image-generation)
+    GEMINI_IMAGE_MODEL  — image generation model (default: gemini-2.5-flash-image)
 """
 from __future__ import annotations
 
 import os
+import time
 from abc import ABC, abstractmethod
+from typing import Callable, Generator, TypeVar
 
 from app.logger import get_logger
 
 _log = get_logger("providers")
+
+_T = TypeVar("_T")
+
+# Transient error keywords for classification
+_TRANSIENT_KEYWORDS = ("429", "rate", "limit", "timeout", "timed out", "503", "500",
+                       "overloaded", "resource_exhausted", "unavailable", "connection")
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Check if an exception is likely transient and retryable."""
+    msg = str(exc).lower()
+    # 404 NOT_FOUND is permanent — model doesn't exist, don't retry
+    if "404" in msg or "not_found" in msg:
+        return False
+    return any(kw in msg for kw in _TRANSIENT_KEYWORDS)
+
+
+def _parse_retry_after(exc: Exception) -> float | None:
+    """Try to extract Retry-After seconds from exception."""
+    msg = str(exc)
+    import re
+    match = re.search(r"[Rr]etry.?[Aa]fter[:\s]+(\d+)", msg)
+    if match:
+        return min(float(match.group(1)), 30.0)
+    return None
+
+
+def retry_api_call(
+    fn: Callable[[], _T],
+    *,
+    max_retries: int = 3,
+    base_delay: float = 2.0,
+    label: str = "API",
+) -> _T:
+    """Execute fn with exponential backoff on transient errors.
+
+    Args:
+        fn: Zero-arg callable to retry.
+        max_retries: Maximum retry attempts (default 3).
+        base_delay: Initial delay in seconds (doubles each retry).
+        label: Label for log messages.
+
+    Returns:
+        Result of fn().
+
+    Raises:
+        The last exception if all retries fail, or immediately for non-transient errors.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_retries or not _is_transient(exc):
+                raise
+            retry_after = _parse_retry_after(exc)
+            delay = retry_after if retry_after else base_delay * (2 ** attempt)
+            _log.warning(
+                "%s 일시적 오류 (시도 %d/%d), %.1f초 후 재시도: %s",
+                label, attempt + 1, max_retries + 1, delay, exc,
+            )
+            time.sleep(delay)
+    raise last_exc  # type: ignore[misc]  # unreachable but satisfies type checker
 
 
 class BaseProvider(ABC):
@@ -39,6 +105,16 @@ class BaseProvider(ABC):
                            the instruction text never appears in the output.
         """
 
+    def generate_text_stream(
+        self, prompt: str, *, system_prompt: str | None = None
+    ) -> Generator[str, None, None]:
+        """Yield text chunks as they arrive from the model.
+
+        Default implementation calls generate_text() and yields the full result
+        as a single chunk. Subclasses may override for true streaming.
+        """
+        yield self.generate_text(prompt, system_prompt=system_prompt)
+
 
 class ClaudeProvider(BaseProvider):
     """Anthropic Claude via Messages API."""
@@ -49,7 +125,7 @@ class ClaudeProvider(BaseProvider):
         self,
         api_key: str | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> None:
         import anthropic
 
@@ -73,19 +149,42 @@ class ClaudeProvider(BaseProvider):
             kwargs["system"] = system_prompt
         try:
             _log.info("Claude API 호출 시작 (model=%s)", self._model)
-            response = self._client.messages.create(**kwargs)
+            response = retry_api_call(
+                lambda: self._client.messages.create(**kwargs),
+                label="Claude",
+            )
             _log.info("Claude API 호출 완료")
         except Exception as exc:
             _log.error("Claude API 호출 실패: %s", exc)
             raise ValueError(f"Claude API 호출 실패: {exc}") from exc
         return "".join(block.text for block in response.content if hasattr(block, "text"))
 
+    def generate_text_stream(
+        self, prompt: str, *, system_prompt: str | None = None
+    ) -> Generator[str, None, None]:
+        kwargs: dict = dict(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        try:
+            _log.info("Claude 스트리밍 시작 (model=%s)", self._model)
+            with self._client.messages.stream(**kwargs) as stream:
+                for text in stream.text_stream:
+                    yield text
+            _log.info("Claude 스트리밍 완료")
+        except Exception as exc:
+            _log.error("Claude 스트리밍 실패: %s", exc)
+            raise ValueError(f"Claude 스트리밍 실패: {exc}") from exc
+
 
 class GeminiProvider(BaseProvider):
     """Google Gemini via google-genai SDK."""
 
     DEFAULT_MODEL = "gemini-3.1-pro-preview"
-    DEFAULT_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation"
+    DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
 
     def __init__(
         self,
@@ -111,7 +210,7 @@ class GeminiProvider(BaseProvider):
 
     def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
         from google.genai import types
-        config_kwargs: dict = {"max_output_tokens": 4096}
+        config_kwargs: dict = {"max_output_tokens": 8192}
         if system_prompt:
             config_kwargs["system_instruction"] = system_prompt
         kwargs: dict = dict(
@@ -121,7 +220,10 @@ class GeminiProvider(BaseProvider):
         )
         try:
             _log.info("Gemini API 호출 시작 (model=%s)", self._model)
-            response = self._client.models.generate_content(**kwargs)
+            response = retry_api_call(
+                lambda: self._client.models.generate_content(**kwargs),
+                label="Gemini",
+            )
             _log.info("Gemini API 호출 완료")
         except Exception as exc:
             _log.error("Gemini API 호출 실패: %s", exc)
@@ -133,6 +235,28 @@ class GeminiProvider(BaseProvider):
                 "Gemini 응답이 비어 있습니다. 프롬프트를 조정하거나 다시 시도해주세요."
             )
         return text
+
+    def generate_text_stream(
+        self, prompt: str, *, system_prompt: str | None = None
+    ) -> Generator[str, None, None]:
+        from google.genai import types
+        config_kwargs: dict = {"max_output_tokens": 8192}
+        if system_prompt:
+            config_kwargs["system_instruction"] = system_prompt
+        kwargs: dict = dict(
+            model=self._model,
+            contents=prompt,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+        try:
+            _log.info("Gemini 스트리밍 시작 (model=%s)", self._model)
+            for chunk in self._client.models.generate_content_stream(**kwargs):
+                if chunk.text:
+                    yield chunk.text
+            _log.info("Gemini 스트리밍 완료")
+        except Exception as exc:
+            _log.error("Gemini 스트리밍 실패: %s", exc)
+            raise ValueError(f"Gemini 스트리밍 실패: {exc}") from exc
 
     def generate_image(
         self,
@@ -169,10 +293,13 @@ class GeminiProvider(BaseProvider):
 
         try:
             _log.info("Gemini 이미지 생성 시작 (model=%s)", image_model)
-            response = self._client.models.generate_content(
-                model=image_model,
-                contents=contents,
-                config=config,
+            response = retry_api_call(
+                lambda: self._client.models.generate_content(
+                    model=image_model,
+                    contents=contents,
+                    config=config,
+                ),
+                label="Gemini 이미지",
             )
             _log.info("Gemini 이미지 생성 완료")
         except Exception as exc:

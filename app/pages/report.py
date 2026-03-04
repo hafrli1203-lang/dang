@@ -369,7 +369,7 @@ def report_page() -> None:
                         nicegui_app.storage.user.__setitem__(
                             "current_project_id", e.value
                         ),
-                        _load_saved_data(),
+                        asyncio.ensure_future(_load_saved_data()),
                     ),
                 )
 
@@ -395,6 +395,7 @@ def report_page() -> None:
                             label="파일 선택 (.csv / .xlsx)",
                             auto_upload=True,
                             on_upload=lambda e: asyncio.ensure_future(_handle_upload(e)),
+                            max_file_size=50_000_000,  # 50 MB
                         ).classes("max-w-xs").props('accept=".csv,.xlsx"')
 
                         ui.button(
@@ -402,6 +403,11 @@ def report_page() -> None:
                             on_click=lambda: _create_sample_excel(),
                         ).classes("bg-gray-200 text-gray-700 text-sm")
 
+                    # ── 업로드 진행 스피너 ──
+                    upload_spinner = ui.row().classes("w-full mt-2 items-center gap-2 hidden")
+                    with upload_spinner:
+                        ui.spinner("dots", size="sm")
+                        upload_spinner_label = ui.label("파일 파싱 중...").classes("text-sm text-gray-500")
                     # ── 업로드 결과 요약 ──
                     upload_summary = ui.column().classes("w-full mt-2 hidden")
                     # ── 업로드 미리보기 ──
@@ -457,7 +463,7 @@ def report_page() -> None:
 
                         ui.button(
                             "데이터 적용",
-                            on_click=lambda: _apply_manual_inputs(_manual_inputs),
+                            on_click=lambda: asyncio.ensure_future(_apply_manual_inputs(_manual_inputs)),
                         ).classes("bg-orange-500 text-white text-sm")
 
         # ── KPI display ────────────────────────────────────────────────────
@@ -557,12 +563,12 @@ def report_page() -> None:
 
         # ── Data handlers ──────────────────────────────────────────────────
 
-        def _set_rows(rows: List[Dict]) -> None:
+        async def _set_rows(rows: List[Dict]) -> None:
             page_state["rows"] = rows
             kpi = calc_kpi(rows)
             page_state["kpi"] = kpi
             _show_kpi(kpi)
-            _render_charts(rows)
+            await _render_charts(rows)
             pid = nicegui_app.storage.user.get("current_project_id")
             if pid:
                 save_performance_rows(pid, rows)
@@ -594,11 +600,17 @@ def report_page() -> None:
                 filename = e.file.name or ""
                 ext = Path(filename).suffix.lower()
 
+                upload_spinner_label.set_text(f"'{filename}' 파싱 중...")
+                upload_spinner.classes(remove="hidden")
                 upload_summary.clear()
                 upload_summary.classes(remove="hidden")
 
+                loop = asyncio.get_running_loop()
+
                 if ext == ".csv":
-                    csv_rows, warnings = parse_daangn_csv(file_bytes)
+                    csv_rows, warnings = await loop.run_in_executor(
+                        None, parse_daangn_csv, file_bytes,
+                    )
                     # CSV 결과를 내부 row 포맷으로 변환 (date → period_label)
                     rows = [
                         {
@@ -639,7 +651,9 @@ def report_page() -> None:
                         ui.notify("CSV에서 유효한 데이터를 찾을 수 없습니다.", type="warning")
                         return
                 elif ext == ".xlsx":
-                    rows, warning = _parse_excel(file_bytes)
+                    rows, warning = await loop.run_in_executor(
+                        None, _parse_excel, file_bytes,
+                    )
                     with upload_summary:
                         with ui.card().classes("w-full bg-blue-50 p-3"):
                             ui.label(f"XLSX 파싱 결과: {len(rows)}행 로드됨").classes(
@@ -659,12 +673,15 @@ def report_page() -> None:
                     ui.notify(f"지원하지 않는 파일 형식입니다: {ext}", type="negative")
                     return
 
-                _set_rows(rows)
+                upload_spinner.classes("hidden")
+                upload_summary.classes(remove="hidden")
+                await _set_rows(rows)
                 _show_upload_preview(rows)
             except Exception as exc:
+                upload_spinner.classes("hidden")
                 ui.notify(f"파일 파싱 오류: {exc}", type="negative")
 
-        def _apply_manual_inputs(inputs: List[dict]) -> None:
+        async def _apply_manual_inputs(inputs: List[dict]) -> None:
             rows = []
             for inp in inputs:
                 rows.append(
@@ -682,11 +699,12 @@ def report_page() -> None:
             if not rows:
                 ui.notify("유효한 데이터 행이 없습니다.", type="warning")
                 return
-            _set_rows(rows)
+            await _set_rows(rows)
 
-        def _render_charts(rows: List[Dict]) -> None:
+        async def _render_charts(rows: List[Dict]) -> None:
             chart_row.clear()
-            paths = make_charts(rows, CHARTS_DIR)
+            loop = asyncio.get_running_loop()
+            paths = await loop.run_in_executor(None, make_charts, rows, CHARTS_DIR)
             if not paths:
                 return
             chart_card.classes(remove="hidden")
@@ -695,7 +713,7 @@ def report_page() -> None:
                     if p.exists():
                         ui.image(str(p)).classes("max-w-sm rounded shadow")
 
-        def _load_saved_data() -> None:
+        async def _load_saved_data() -> None:
             pid = nicegui_app.storage.user.get("current_project_id")
             if not pid:
                 return
@@ -705,7 +723,7 @@ def report_page() -> None:
                 kpi = calc_kpi(rows)
                 page_state["kpi"] = kpi
                 _show_kpi(kpi)
-                _render_charts(rows)
+                await _render_charts(rows)
             rpt = get_latest_report(pid)
             if rpt:
                 page_state["report_content"] = rpt["content"]
@@ -739,7 +757,7 @@ def report_page() -> None:
             try:
                 _set_step("1/4 프롬프트 생성 중...")
                 prompt = build_report_prompt(project, rows, kpi, extra)
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
 
                 if page_state["cancelled"]:
                     ui.notify("생성이 중단되었습니다.", type="warning")
@@ -842,7 +860,7 @@ def report_page() -> None:
         async def _build_report_pairs() -> list[tuple[bytes, str]]:
             """Build DOCX byte pairs: [(bytes, filename), ...]"""
             project, project_name, rows, kpi, content, engine = _validate_export()
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if engine == "both" and page_state.get("c_text") and page_state.get("g_text"):
                 c_bytes, g_bytes = await asyncio.gather(
                     loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, page_state["c_text"]),
@@ -906,4 +924,4 @@ def report_page() -> None:
         create_path_info_panel()
 
         # initial load
-        _load_saved_data()
+        asyncio.ensure_future(_load_saved_data())

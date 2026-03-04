@@ -9,17 +9,19 @@ from datetime import date, datetime
 
 
 HEADER_CANDIDATES: dict[str, tuple[str, ...]] = {
-    "date": ("날짜", "일자", "date", "일시"),
+    "date": ("날짜", "일자", "date", "일시", "기간"),
     "cost": ("비용", "광고비", "집행금액", "광고비용", "spend", "cost"),
     "impressions": ("노출", "노출수", "impression", "impressions"),
     "clicks": ("클릭", "클릭수", "click", "clicks"),
     "inquiries": ("채팅", "문의", "대화", "상담", "문의수", "채팅수", "inquiries"),
     "regulars": ("단골", "단골수", "팔로워", "팔로우", "follower", "followers"),
     "coupons": ("쿠폰", "쿠폰사용", "쿠폰사용수", "쿠폰수", "coupon", "coupons"),
+    "reach": ("도달", "도달수", "reach"),
+    "campaign_name": ("캠페인", "캠페인이름", "campaign"),
 }
 
 REQUIRED_FIELDS = ("date", "cost", "impressions", "clicks")
-OPTIONAL_FIELDS = ("inquiries", "regulars", "coupons")
+OPTIONAL_FIELDS = ("inquiries", "regulars", "coupons", "reach")
 ALL_FIELDS = REQUIRED_FIELDS + OPTIONAL_FIELDS
 
 
@@ -34,18 +36,33 @@ def _looks_like_rate_header(value: str) -> bool:
 
 
 def _build_header_map(headers: list[str]) -> dict[str, int]:
+    """Map CSV headers to internal field names.
+
+    Uses candidate-priority matching: for each field, tries the most specific
+    candidate first across ALL headers before falling back to broader candidates.
+    This prevents e.g. '문의' matching '전화 문의 수' when '채팅 문의 수' exists.
+    """
     header_map: dict[str, int] = {}
-    for idx, header in enumerate(headers):
-        normalized = _normalize_header(header)
-        if not normalized:
+    used_cols: set[int] = set()
+    _numeric_fields = {"impressions", "clicks", "inquiries", "regulars", "coupons", "reach"}
+    normalized_headers = [(idx, _normalize_header(h), h) for idx, h in enumerate(headers)]
+
+    for field, candidates in HEADER_CANDIDATES.items():
+        if field in header_map:
             continue
-        for field, candidates in HEADER_CANDIDATES.items():
-            if field in header_map:
-                continue
-            if field in {"impressions", "clicks", "inquiries", "regulars", "coupons"} and _looks_like_rate_header(header):
-                continue
-            if any(normalized == candidate or candidate in normalized for candidate in candidates):
-                header_map[field] = idx
+        for candidate in candidates:
+            matched = False
+            for idx, normalized, raw in normalized_headers:
+                if idx in used_cols:
+                    continue
+                if field in _numeric_fields and _looks_like_rate_header(raw):
+                    continue
+                if normalized == candidate or candidate in normalized:
+                    header_map[field] = idx
+                    used_cols.add(idx)
+                    matched = True
+                    break
+            if matched:
                 break
     return header_map
 
@@ -93,11 +110,19 @@ def _parse_date(value: str) -> date:
 
 
 def _decode_csv_bytes(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "cp949"):
+    for encoding in ("utf-8-sig", "cp949", "euc-kr", "utf-16"):
         try:
             return data.decode(encoding)
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, UnicodeError):
             continue
+    # Last resort: charset-normalizer for unknown encodings
+    try:
+        from charset_normalizer import from_bytes
+        result = from_bytes(data).best()
+        if result:
+            return str(result)
+    except ImportError:
+        pass
     return data.decode("utf-8-sig", errors="replace")
 
 
@@ -151,7 +176,14 @@ def parse_daangn_csv(data: bytes) -> tuple[list[dict], list[str]]:
                 "inquiries": 0,
                 "regulars": 0,
                 "coupons": 0,
+                "reach": 0,
             }
+            # String field: campaign_name
+            cn_col = header_map.get("campaign_name")
+            if cn_col is not None and cn_col < len(row):
+                parsed["campaign_name"] = row[cn_col].strip()
+            else:
+                parsed["campaign_name"] = ""
         except (ValueError, OverflowError) as exc:
             skipped += 1
             warnings.append(f"line {offset}: skipped ({exc})")

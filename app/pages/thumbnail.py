@@ -22,7 +22,9 @@ def thumbnail_page() -> None:
         "ref_mime": "image/png",
         "result_bytes": None,
         "result_mime": "image/png",
+        "history": [],  # list of (bytes, mime, prompt_snippet)
     }
+    _MAX_HISTORY = 10
 
     with ui.column().classes("w-full p-6 gap-4"):
 
@@ -101,9 +103,52 @@ def thumbnail_page() -> None:
             ui.label("생성 결과").classes("font-bold text-gray-700 mb-2")
             result_container
 
+        # ── 이미지 히스토리 ──
+        thumb_history_label = ui.label("").classes("text-xs text-gray-400 mt-2 hidden")
+        thumb_history_strip = ui.row().classes(
+            "w-full overflow-x-auto gap-2 mt-1 hidden"
+        ).style("max-height: 120px")
+
         # ── 진단 패널 ────────────────────────────────────────────
         create_log_panel()
         create_path_info_panel()
+
+    def _refresh_history() -> None:
+        history = page_state["history"]
+        if not history:
+            thumb_history_strip.classes("hidden")
+            thumb_history_label.classes("hidden")
+            return
+        thumb_history_label.set_text(f"이전 생성 ({len(history)}장)")
+        thumb_history_label.classes(remove="hidden")
+        thumb_history_strip.clear()
+        thumb_history_strip.classes(remove="hidden")
+        with thumb_history_strip:
+            for idx, (img_bytes, mime, snippet) in enumerate(history):
+                b64 = base64.b64encode(img_bytes).decode()
+                with ui.column().classes("items-center cursor-pointer shrink-0"):
+                    ui.image(f"data:{mime};base64,{b64}").classes(
+                        "w-20 h-20 object-cover rounded border"
+                    ).on("click", lambda _, i=idx: _restore_history(i))
+                    ui.label(snippet[:12]).classes("text-xs text-gray-400 truncate max-w-20")
+
+    def _restore_history(idx: int) -> None:
+        history = page_state["history"]
+        if idx < 0 or idx >= len(history):
+            return
+        img_bytes, mime, snippet = history[idx]
+        page_state["result_bytes"] = img_bytes
+        page_state["result_mime"] = mime
+        b64 = base64.b64encode(img_bytes).decode()
+        result_container.clear()
+        with result_container:
+            ui.image(f"data:{mime};base64,{b64}").classes("max-w-lg rounded shadow")
+            ui.label(f"{len(img_bytes):,} bytes | 복원: {snippet[:20]}").classes(
+                "text-xs text-gray-400"
+            )
+        result_card.classes(remove="hidden")
+        save_btn.classes(remove="hidden")
+        ui.notify(f"이미지 복원됨: {snippet[:20]}", type="info", timeout=2000)
 
     # ── 핸들러 ────────────────────────────────────────────────────
 
@@ -152,7 +197,7 @@ def thumbnail_page() -> None:
             from app.ai.providers import GeminiProvider
 
             provider = GeminiProvider()
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             ref = page_state["ref_bytes"]
             ref_mime = page_state["ref_mime"]
 
@@ -174,6 +219,12 @@ def thumbnail_page() -> None:
             page_state["result_bytes"] = img_bytes
             page_state["result_mime"] = mime
 
+            # Save to history
+            snippet = prompt_text[:20]
+            page_state["history"].append((img_bytes, mime, snippet))
+            if len(page_state["history"]) > _MAX_HISTORY:
+                page_state["history"] = page_state["history"][-_MAX_HISTORY:]
+
             # 결과 미리보기
             b64 = base64.b64encode(img_bytes).decode()
             result_container.clear()
@@ -188,14 +239,19 @@ def thumbnail_page() -> None:
             save_btn.classes(remove="hidden")
 
             status_label.set_text("생성 완료!")
+            _refresh_history()
             ui.notify("썸네일 생성 완료!", type="positive", timeout=5000)
 
         except ValueError as ve:
             status_label.set_text("생성 실패")
             ui.notify(str(ve), type="negative", timeout=8000)
+            from app.ai.image_provider import get_image_failure_guide
+            ui.notify(get_image_failure_guide(str(ve)), type="info", timeout=15000, close_button="확인")
         except Exception as exc:
             status_label.set_text("오류 발생")
             ui.notify(f"오류: {exc}", type="negative", timeout=8000)
+            from app.ai.image_provider import get_image_failure_guide
+            ui.notify(get_image_failure_guide(str(exc)), type="info", timeout=15000, close_button="확인")
         finally:
             gen_btn.props(remove="disabled loading")
             spinner.classes("hidden")

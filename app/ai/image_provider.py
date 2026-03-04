@@ -11,6 +11,7 @@ import os
 from io import BytesIO
 
 from app.logger import get_logger
+from app.ai.providers import retry_api_call
 
 _log = get_logger("image_provider")
 
@@ -111,10 +112,13 @@ class GeminiImageProvider:
                 len(images),
                 aspect_ratio,
             )
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=contents,
-                config=config,
+            response = retry_api_call(
+                lambda: self._client.models.generate_content(
+                    model=self._model,
+                    contents=contents,
+                    config=config,
+                ),
+                label="Gemini 썸네일",
             )
             _log.info("Gemini 이미지 생성 완료")
         except Exception as exc:
@@ -139,3 +143,48 @@ class GeminiImageProvider:
         raise ValueError(
             "Gemini 응답에 이미지가 포함되지 않았습니다. 다른 프롬프트를 시도해주세요."
         )
+
+
+def get_image_failure_guide(error_msg: str) -> str:
+    """이미지 생성 실패 시 프롬프트 개선 가이드를 반환."""
+    msg = str(error_msg).lower()
+
+    if any(kw in msg for kw in ("safety", "blocked", "filter", "policy", "harmful")):
+        return (
+            "안전 필터에 의해 차단되었습니다.\n"
+            "- 사람 얼굴/실명 브랜드/로고 직접 묘사를 제거하세요\n"
+            "- 의료/약품/폭력 관련 묘사를 피하세요\n"
+            "- 추상적 또는 일러스트 스타일로 변경해보세요"
+        )
+    if any(kw in msg for kw in ("이미지가 포함되지", "no image", "empty", "비어")):
+        return (
+            "이미지가 생성되지 않았습니다.\n"
+            "- 더 구체적인 시각 묘사를 추가하세요 (색상, 구도, 스타일)\n"
+            "- 'photo of', 'illustration of' 같은 접두어를 사용해보세요\n"
+            "- 프롬프트가 너무 짧으면 세부 사항을 추가하세요"
+        )
+    if any(kw in msg for kw in ("429", "rate", "limit", "resource_exhausted", "quota")):
+        return (
+            "API 사용량 한도에 도달했습니다.\n"
+            "- 잠시 후 다시 시도해주세요 (1-2분 대기)\n"
+            "- 동시 생성 요청 수를 줄여보세요"
+        )
+    if any(kw in msg for kw in ("timeout", "timed out", "deadline")):
+        return (
+            "요청 시간이 초과되었습니다.\n"
+            "- 프롬프트를 간결하게 줄여보세요\n"
+            "- 참고 이미지 크기를 줄여보세요 (2MB 이하 권장)\n"
+            "- 네트워크 상태를 확인하세요"
+        )
+    if any(kw in msg for kw in ("503", "500", "overloaded", "unavailable")):
+        return (
+            "서버가 일시적으로 과부하 상태입니다.\n"
+            "- 30초~1분 후 다시 시도해주세요\n"
+            "- 자동 재시도가 실패한 경우 직접 다시 시도하세요"
+        )
+    return (
+        "이미지 생성에 실패했습니다.\n"
+        "- 프롬프트를 수정하여 다시 시도해주세요\n"
+        "- API 키 설정을 확인하세요\n"
+        "- 오류가 반복되면 다른 모델을 시도해보세요"
+    )
