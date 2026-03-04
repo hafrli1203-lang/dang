@@ -5,7 +5,10 @@ import sys
 __version__ = "1.0.0"
 
 # ── Centralized paths (platformdirs-based) ────────────────────────────────────
-from app.paths import IS_FROZEN, BUNDLE_DIR, APP_DIR, DATA_DIR, STORAGE_DIR, get_env_path, migrate_legacy_files
+from app.paths import IS_FROZEN, BUNDLE_DIR, APP_DIR, DATA_DIR, STORAGE_DIR, get_env_path, migrate_legacy_files, ensure_dirs
+
+# ── Ensure all data directories exist before anything else ────────────────────
+ensure_dirs()
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
 from dotenv import load_dotenv

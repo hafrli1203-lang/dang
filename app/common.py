@@ -1,104 +1,35 @@
 """Shared UI components for all pages."""
-import os
-import platform
-import subprocess
 import sys
 from pathlib import Path
 
 from nicegui import ui
 
-from app.paths import EXPORTS_DIR
-from app.logger import get_logger
-
-_log = get_logger("common")
+from app.export_manager import ExportManager
 
 
-def _open_path(path: Path) -> None:
-    """Open a file or folder with the OS default handler."""
-    try:
-        if platform.system() == "Windows":
-            os.startfile(str(path))
-        elif platform.system() == "Darwin":
-            subprocess.Popen(["open", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
-    except Exception:
-        pass
+# ── Backward-compat wrappers (delegate to ExportManager) ──────────────────
 
 
-def safe_download(data: bytes, filename: str) -> None:
-    """기본 폴더 저장: EXPORTS_DIR에 자동 저장 + 열기 버튼 알림.  Browser 모드: ui.download()."""
-    if getattr(sys, '_nicegui_native', False):
-        saved = EXPORTS_DIR / filename
-        saved.write_bytes(data)
-        _log.info("기본 폴더 저장: %s (%d bytes)", saved, len(data))
-        with ui.dialog() as dlg, ui.card().classes("items-center p-6 gap-3"):
-            ui.label(f"저장 완료: {saved.name}").classes("font-bold")
-            ui.label(str(saved)).classes("text-xs text-gray-500 break-all")
-            with ui.row().classes("gap-3 mt-2"):
-                ui.button("파일 열기", on_click=lambda: (_open_path(saved), dlg.close())).classes(
-                    "bg-orange-500 text-white"
-                )
-                ui.button("폴더 열기", on_click=lambda: (_open_path(EXPORTS_DIR), dlg.close())).classes(
-                    "bg-gray-200 text-gray-700"
-                )
-                ui.button("닫기", on_click=dlg.close).classes("bg-gray-100")
-        dlg.open()
-        return
-    _log.info("브라우저 다운로드: %s (%d bytes)", filename, len(data))
-    ui.download(data, filename=filename)
+def safe_download(data: bytes, filename: str, *, dest_dir: "Path | None" = None) -> None:
+    """기본 폴더 저장. ExportManager.save_default() delegate."""
+    ExportManager.save_default(data, filename, dest_dir=dest_dir)
 
 
 async def save_as_download(data: bytes, filename: str) -> bool:
-    """다른 위치로 저장: native면 Save As 다이얼로그, browser면 ui.download(). 성공 시 True."""
-    from app.exporting import choose_save_path_docx
+    """Save As 다이얼로그. ExportManager.save_as() delegate."""
+    return await ExportManager.save_as(data, filename)
 
-    path = await choose_save_path_docx(filename)
-    if path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        _log.info("Save As 저장: %s (%d bytes)", path, len(data))
-        ui.notify(f"저장 완료: {path}", type="positive", timeout=6000, close_button="확인")
-        return True
-
-    # browser mode or native cancel → fall back to browser download
-    if not getattr(sys, "_nicegui_native", False):
-        _log.info("브라우저 다운로드 (Save As fallback): %s (%d bytes)", filename, len(data))
-        ui.download(data, filename=filename)
-        return True
-
-    # native cancel
-    _log.info("Save As 취소됨: %s", filename)
-    return False
 
 async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
-    """여러 파일: 폴더 다이얼로그 1회. 단일 파일: 기존 Save As. browser: ui.download()."""
-    if len(pairs) == 1:
-        return await save_as_download(pairs[0][0], pairs[0][1])
-
-    from app.exporting import choose_save_folder
-
-    folder = await choose_save_folder()
-    if folder is not None:
-        folder.mkdir(parents=True, exist_ok=True)
-        for data, filename in pairs:
-            (folder / filename).write_bytes(data)
-            _log.info("Save As (폴더): %s/%s (%d bytes)", folder, filename, len(data))
-        ui.notify(f"저장 완료: {folder}", type="positive", timeout=8000, close_button="확인")
-        return True
-
-    if not getattr(sys, "_nicegui_native", False):
-        for data, filename in pairs:
-            ui.download(data, filename=filename)
-        return True
-
-    return False  # native cancel
+    """복수 파일 Save As. ExportManager.save_as_multi() delegate."""
+    return await ExportManager.save_as_multi(pairs)
 
 
 NAV_PAGES = [
     ("프로젝트 관리", "/"),
     ("광고 기획", "/planning"),
     ("성과 보고서", "/report"),
+    ("썸네일 제작", "/thumbnail"),
 ]
 
 
@@ -149,7 +80,7 @@ def create_log_panel() -> None:
 
 def create_path_info_panel() -> None:
     """Expandable panel showing resolved paths and run mode."""
-    from app.paths import DATA_DIR, DB_PATH, EXPORTS_DIR, CHARTS_DIR, LOG_PATH, APP_DIR, IS_FROZEN
+    from app.paths import DATA_DIR, DB_PATH, EXPORTS_DIR, CHARTS_DIR, THUMBNAILS_DIR, LOG_PATH, APP_DIR, IS_FROZEN
 
     with ui.expansion("경로 정보", icon="folder_open").classes("w-full bg-blue-50 mt-2"):
         for label, path in [
@@ -157,6 +88,7 @@ def create_path_info_panel() -> None:
             ("DB", DB_PATH),
             ("내보내기", EXPORTS_DIR),
             ("차트", CHARTS_DIR),
+            ("썸네일", THUMBNAILS_DIR),
             ("로그", LOG_PATH),
             ("앱 디렉토리", APP_DIR),
         ]:

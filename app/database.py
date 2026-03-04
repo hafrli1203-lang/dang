@@ -1,23 +1,48 @@
 """SQLite database layer for daangn_ad_reporter."""
 import csv
 import io
+import logging
 import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
-from app.paths import DB_PATH
+from app.paths import get_db_path, APP_DIR
+
+_log = logging.getLogger("daangn.database")
+
+_db_path = get_db_path()
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
+def _migrate_legacy_db() -> None:
+    """APP_DIR 내 레거시 DB를 DATA_DIR로 1회 마이그레이션.
+
+    - DATA_DIR에 DB가 없으면: 단순 복사
+    - DATA_DIR에 이미 있으면: 레거시 파일을 .bak으로 이름 변경 (충돌 방지)
+    """
+    legacy = APP_DIR / "daangn_ads.db"
+    if not legacy.exists() or legacy == _db_path:
+        return
+    if not _db_path.exists():
+        shutil.copy2(legacy, _db_path)
+        _log.info("레거시 DB 마이그레이션: %s → %s", legacy, _db_path)
+    else:
+        bak = legacy.with_suffix(".db.bak")
+        if not bak.exists():
+            legacy.rename(bak)
+            _log.info("레거시 DB 백업: %s → %s (DATA_DIR에 이미 존재)", legacy, bak)
+
+
 def init_db() -> None:
+    _migrate_legacy_db()
     with get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS projects (
@@ -220,9 +245,9 @@ def export_performance_csv(project_id: int | None = None) -> bytes:
 
 def backup_db(dest_dir: Path | None = None) -> Path:
     """Copy the DB file to dest_dir (or same dir) with timestamp suffix."""
-    dest_dir = dest_dir or DB_PATH.parent
+    dest_dir = dest_dir or _db_path.parent
     dest_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = dest_dir / f"daangn_ads_backup_{ts}.db"
-    shutil.copy2(DB_PATH, dest)
+    shutil.copy2(_db_path, dest)
     return dest
