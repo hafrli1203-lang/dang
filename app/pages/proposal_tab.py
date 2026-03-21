@@ -1,4 +1,4 @@
-"""제안서 탭 UI — /planning 페이지의 '운영 제안서' 탭 내용.
+"""제안서 탭 UI -- /planning 페이지의 '운영 제안서' 탭 내용.
 
 스트리밍 지원: queue.Queue + ui.timer(0.2) 브릿지 패턴.
 """
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from nicegui import ui, app as nicegui_app
 
+from app.theme import section_header
 from app.ai_engine import (
     build_proposal_prompt,
     build_proposal_section_prompt,
@@ -20,6 +21,7 @@ from app.ai_engine import (
     _PROPOSAL_SECTION_KEYS,
 )
 from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
+from app.ai.news_post_guard import _split_blocks
 from app.database import (
     get_project,
     get_latest_content,
@@ -35,7 +37,7 @@ _log = logging.getLogger("daangn.proposal_tab")
 def build_proposal_tab() -> None:  # noqa: C901
     """Render the proposal tab content inside the planning page."""
 
-    # ── State ─────────────────────────────────────────────────────────────
+    # -- State --
     _state: dict = {
         "csv_rows": None,
         "csv_warnings": [],
@@ -46,20 +48,32 @@ def build_proposal_tab() -> None:  # noqa: C901
     }
 
     with ui.column().classes("w-full gap-4"):
-        ui.label("광고 운영 제안서 생성기").classes("text-xl font-bold text-gray-700")
-        ui.label(
-            "7섹션 구조의 전문 광고 운영 제안서를 AI로 자동 생성합니다."
-        ).classes("text-sm text-gray-500")
+        # Wizard Step 4 notice
+        with ui.card().classes("dg-card w-full").style(
+            "background: var(--dg-primary-light); border: 1px solid var(--dg-primary)"
+        ):
+            with ui.row().classes("items-center gap-3"):
+                ui.icon("info", size="24px").style("color: var(--dg-primary)")
+                with ui.column().classes("gap-1"):
+                    ui.label("소식글 기획 탭의 Step 4에서 통합 운영 제안서를 생성할 수 있습니다.").style(
+                        "font-weight: 600; font-size: 14px; color: var(--dg-text-primary)"
+                    )
+                    ui.label(
+                        "4단계 위자드(전략 분석 > 콘텐츠 생성 > 광고 세팅 > 운영 제안서)를 통해 "
+                        "더욱 종합적인 제안서를 생성할 수 있습니다."
+                    ).classes("dg-label-sm")
 
-        # ── Input form ────────────────────────────────────────────────────
-        with ui.card().classes("w-full"):
-            ui.label("점포 정보").classes("font-bold text-gray-700 mb-2")
+        section_header("description", "광고 운영 제안서 생성기 (독립 모드)",
+                       "7섹션 구조의 전문 광고 운영 제안서를 AI로 자동 생성합니다.")
+
+        # -- Input form --
+        with ui.card().classes("dg-card w-full"):
+            section_header("store", "점포 정보")
             with ui.row().classes("w-full gap-4 flex-wrap"):
-                shop_name_input = ui.input("점포명", placeholder="예: 행복안경").classes("flex-1 min-w-48")
-                industry_input = ui.input("업종", placeholder="예: 안경점").classes("flex-1 min-w-48")
-                location_input = ui.input("위치", placeholder="예: 부천시 심곡동").classes("flex-1 min-w-48")
+                shop_name_input = ui.input("점포명", placeholder="예: 행복안경").classes("flex-1 min-w-48 dg-input").props("outlined dense")
+                industry_input = ui.input("업종", placeholder="예: 안경점").classes("flex-1 min-w-48 dg-input").props("outlined dense")
+                location_input = ui.input("위치", placeholder="예: 부천시 심곡동").classes("flex-1 min-w-48 dg-input").props("outlined dense")
 
-            # Pre-fill from selected project
             pid = nicegui_app.storage.user.get("current_project_id")
             if pid:
                 proj = get_project(pid)
@@ -68,33 +82,26 @@ def build_proposal_tab() -> None:  # noqa: C901
                     industry_input.set_value(proj.get("industry", ""))
                     location_input.set_value(proj.get("region", ""))
 
-        with ui.card().classes("w-full"):
-            ui.label("프로모션 & 타겟").classes("font-bold text-gray-700 mb-2")
+        with ui.card().classes("dg-card w-full"):
+            section_header("campaign", "프로모션 & 타겟")
             promo_input = ui.textarea(
                 "프로모션/상품 정보",
                 placeholder="예: 누진렌즈 0원 프로모션, 45-65세 타겟, 3월 한정",
-            ).classes("w-full").props("rows=3")
+            ).classes("w-full dg-input").props("rows=3 outlined")
             age_select = ui.select(
                 {
-                    "전연령": "전연령",
-                    "10대-20대": "10대-20대",
-                    "20대-30대": "20대-30대",
-                    "30대-40대": "30대-40대",
-                    "40대-50대": "40대-50대",
-                    "50대-60대": "50대-60대",
+                    "전연령": "전연령", "10대-20대": "10대-20대",
+                    "20대-30대": "20대-30대", "30대-40대": "30대-40대",
+                    "40대-50대": "40대-50대", "50대-60대": "50대-60대",
                     "60대 이상": "60대 이상",
                 },
-                label="타겟 연령대",
-                value="전연령",
-            ).classes("w-48")
+                label="타겟 연령대", value="전연령",
+            ).classes("w-48 dg-select")
 
-        with ui.card().classes("w-full"):
-            ui.label("이전 캠페인 성과 (선택)").classes("font-bold text-gray-700 mb-2")
-            ui.label(
-                "CSV 파일을 업로드하면 자동으로 KPI를 계산합니다. 없으면 아래에 직접 입력하세요."
-            ).classes("text-xs text-gray-400 mb-2")
+        with ui.card().classes("dg-card w-full"):
+            section_header("analytics", "이전 캠페인 성과", "CSV 파일을 업로드하면 자동으로 KPI를 계산합니다.")
 
-            csv_status = ui.label("").classes("text-sm text-gray-500")
+            csv_status = ui.label("").classes("dg-text-sm")
 
             async def _on_csv_upload(e) -> None:
                 if not e.content:
@@ -106,77 +113,75 @@ def build_proposal_tab() -> None:  # noqa: C901
                 if rows:
                     _state["kpi"] = calc_kpi(rows)
                     csv_status.set_text(f"CSV 파싱 완료: {len(rows)}행 ({len(warnings)}건 경고)")
-                    csv_status.classes("text-green-600", remove="text-gray-500 text-red-500")
+                    csv_status.style("color: var(--dg-success)")
                     manual_summary.set_visibility(False)
                 else:
                     csv_status.set_text(f"CSV 파싱 실패: {'; '.join(warnings)}")
-                    csv_status.classes("text-red-500", remove="text-gray-500 text-green-600")
+                    csv_status.style("color: var(--dg-error)")
 
             ui.upload(
                 label="CSV 파일 업로드",
                 on_upload=_on_csv_upload,
                 auto_upload=True,
-            ).props('accept=".csv" flat bordered').classes("w-full max-w-md")
+            ).props('accept=".csv" flat bordered').classes("w-full max-w-md dg-upload")
 
             manual_summary = ui.textarea(
                 "이전 캠페인 요약 (CSV 없을 때)",
                 placeholder="예: CTR 1.5%, CPC 300원, 월 문의 15건, 총 비용 30만원",
-            ).classes("w-full").props("rows=2")
+            ).classes("w-full dg-input").props("rows=2 outlined")
 
-        # ── AI engine selector ────────────────────────────────────────────
-        with ui.card().classes("w-full"):
+        # -- AI engine selector --
+        with ui.card().classes("dg-card w-full"):
             with ui.row().classes("items-center gap-4"):
-                ui.label("AI 엔진").classes("font-bold text-gray-700")
+                ui.icon("smart_toy", size="20px").style("color: var(--dg-primary)")
+                ui.label("AI 엔진").style("font-weight: 600; color: var(--dg-text-primary)")
                 engine_radio = ui.radio(
                     {"claude": "Claude", "gemini": "Gemini", "both": "둘 다 (비교)"},
                     value="claude",
-                ).props("inline")
+                ).props("inline").classes("dg-radio")
 
-        # ── Generate button ───────────────────────────────────────────────
+        # -- Generate button --
         with ui.row().classes("gap-4 items-center"):
             gen_btn = ui.button(
-                "제안서 생성",
+                "제안서 생성", icon="auto_awesome",
                 on_click=lambda: _generate(),
-                icon="auto_awesome",
-            ).classes("bg-orange-500 text-white")
+            ).classes("dg-btn-primary")
             spinner = ui.spinner("dots", size="lg").classes("hidden")
-            progress_label = ui.label("").classes("text-sm text-gray-500")
+            progress_label = ui.label("").classes("dg-progress-text")
 
-        # ── Result area ───────────────────────────────────────────────────
+        # -- Result area --
         result_container = ui.column().classes("w-full gap-2 hidden")
 
         with result_container:
-            with ui.tabs().classes("w-full") as result_tabs:
+            with ui.tabs().classes("w-full dg-tabs") as result_tabs:
                 tab_full = ui.tab("전체 보기")
                 tab_sections = ui.tab("섹션별 보기")
 
             with ui.tab_panels(result_tabs, value=tab_sections).classes("w-full"):
                 with ui.tab_panel(tab_full):
-                    result_md_full = ui.markdown("").classes("w-full")
+                    result_md_full = ui.markdown("").classes("w-full dg-prose")
 
                 with ui.tab_panel(tab_sections):
                     sections_container = ui.column().classes("w-full gap-2")
 
-        # ── Export buttons ────────────────────────────────────────────────
+        # -- Export buttons --
         export_row = ui.row().classes("gap-4 hidden")
         with export_row:
             export_default_btn = ui.button(
-                "기본 폴더에 저장",
-                icon="save",
-            ).classes("bg-blue-500 text-white")
+                "기본 폴더에 저장", icon="save",
+            ).classes("dg-btn-success")
             export_saveas_btn = ui.button(
-                "다른 위치로 저장",
-                icon="save_as",
-            ).classes("bg-green-600 text-white")
+                "다른 위치로 저장", icon="save_as",
+            ).classes("dg-btn-secondary")
 
-        # ── Section rendering ─────────────────────────────────────────────
+        # -- Section rendering --
 
         def _render_sections_now() -> None:
             _render_sections(sections_container, _state, result_md_full, gen_btn, progress_label, regen_fn=_regen_section)
             result_container.classes(remove="hidden")
             export_row.classes(remove="hidden")
 
-        # ── Generate handler ──────────────────────────────────────────────
+        # -- Generate handler --
 
         async def _generate() -> None:
             if _state["generating"]:
@@ -200,18 +205,31 @@ def build_proposal_tab() -> None:  # noqa: C901
             progress_label.set_text("프롬프트 생성 중...")
 
             try:
+                news_post = ""
+                pid = nicegui_app.storage.user.get("current_project_id")
+                if pid:
+                    planning_content = get_latest_content(pid, content_type="planning")
+                    if planning_content:
+                        blocks = _split_blocks(planning_content["content"])
+                        parts = []
+                        if "의심해소" in blocks:
+                            parts.append("【소식글 1 | 의심해소형】\n" + blocks["의심해소"])
+                        if "가성비" in blocks:
+                            parts.append("【소식글 2 | 가성비형】\n" + blocks["가성비"])
+                        news_post = "\n\n".join(parts)
+
                 guide, prompt = build_proposal_prompt(
                     shop_info=shop_info,
                     promo_text=promo_input.value or "",
                     target_age=age_select.value or "전연령",
                     prev_csv_rows=_state["csv_rows"],
                     prev_summary=manual_summary.value or "",
+                    news_post_content=news_post,
                 )
                 loop = asyncio.get_running_loop()
                 content = ""
 
                 if engine == "both":
-                    # "both" mode: sync calls for two providers (no streaming)
                     progress_label.set_text("Claude + Gemini 동시 호출 중...")
                     claude_p = ClaudeProvider()
                     gemini_p = GeminiProvider()
@@ -228,16 +246,14 @@ def build_proposal_tab() -> None:  # noqa: C901
                         f"---\n\n## [Gemini 결과]\n\n{g_text}"
                     )
                 else:
-                    # Single engine: streaming with queue.Queue + ui.timer bridge
                     progress_label.set_text(f"{engine.capitalize()} 스트리밍 중...")
                     provider = get_provider(engine)
                     chunk_queue: queue.Queue[str | None] = queue.Queue()
                     accumulated = ""
                     section_count = 0
 
-                    # Show streaming preview
                     result_container.classes(remove="hidden")
-                    stream_md = ui.markdown("").classes("w-full")
+                    stream_md = ui.markdown("").classes("w-full dg-prose")
 
                     def _stream_worker():
                         try:
@@ -246,11 +262,10 @@ def build_proposal_tab() -> None:  # noqa: C901
                         except Exception as exc:
                             chunk_queue.put(exc)
                         finally:
-                            chunk_queue.put(None)  # sentinel
+                            chunk_queue.put(None)
 
                     future = loop.run_in_executor(None, _stream_worker)
 
-                    # Poll queue with ui.timer
                     stream_done = asyncio.Event()
 
                     def _poll_chunks():
@@ -279,14 +294,12 @@ def build_proposal_tab() -> None:  # noqa: C901
                     await stream_done.wait()
                     content = accumulated
 
-                    # Remove streaming preview (will be replaced by section panels)
                     stream_md.delete()
 
                 progress_label.set_text("섹션 파싱 중...")
                 _state["raw_content"] = content
                 _state["sections"] = parse_proposal_sections(content)
 
-                # Save to DB
                 pid = nicegui_app.storage.user.get("current_project_id")
                 if pid:
                     save_generated_content(pid, engine, content, content_type="proposal")
@@ -304,12 +317,12 @@ def build_proposal_tab() -> None:  # noqa: C901
                 gen_btn.props(remove="disabled")
                 _state["generating"] = False
 
-        # ── Section re-generation handler ─────────────────────────────────
+        # -- Section re-generation handler --
 
         async def _regen_section(section_key: str, feedback: str = "") -> None:
             engine = engine_radio.value
             if engine == "both":
-                engine = "claude"  # default to claude for section regen
+                engine = "claude"
 
             shop_info = {
                 "shop_name": shop_name_input.value or "",
@@ -321,11 +334,27 @@ def build_proposal_tab() -> None:  # noqa: C901
             spinner.classes(remove="hidden")
 
             try:
+                news_post = ""
+                if section_key == "creative":
+                    pid = nicegui_app.storage.user.get("current_project_id")
+                    cur_engine = engine
+                    if pid:
+                        planning_content = get_latest_content(pid, content_type="planning")
+                        if planning_content:
+                            blocks = _split_blocks(planning_content["content"])
+                            parts = []
+                            if "의심해소" in blocks:
+                                parts.append("【소식글 1 | 의심해소형】\n" + blocks["의심해소"])
+                            if "가성비" in blocks:
+                                parts.append("【소식글 2 | 가성비형】\n" + blocks["가성비"])
+                            news_post = "\n\n".join(parts)
+
                 guide, prompt = build_proposal_section_prompt(
                     section_key=section_key,
                     current_content=_state["raw_content"],
                     shop_info=shop_info,
                     feedback=feedback,
+                    news_post_content=news_post,
                 )
                 loop = asyncio.get_running_loop()
                 provider = get_provider(engine)
@@ -334,7 +363,6 @@ def build_proposal_tab() -> None:  # noqa: C901
                 )
                 _state["sections"][section_key] = new_text.strip()
 
-                # Rebuild raw content from sections
                 parts = []
                 for idx, key in enumerate(_PROPOSAL_SECTION_KEYS):
                     name = _PROPOSAL_SECTION_NAMES[key]
@@ -342,7 +370,6 @@ def build_proposal_tab() -> None:  # noqa: C901
                     parts.append(f"## {idx + 1}. {name}\n{body}")
                 _state["raw_content"] = "\n\n".join(parts)
 
-                # Save updated content
                 pid = nicegui_app.storage.user.get("current_project_id")
                 if pid:
                     save_generated_content(pid, engine, _state["raw_content"], content_type="proposal")
@@ -358,7 +385,7 @@ def build_proposal_tab() -> None:  # noqa: C901
             finally:
                 spinner.classes("hidden", remove=False)
 
-        # ── Export handlers ───────────────────────────────────────────────
+        # -- Export handlers --
 
         async def _export_default() -> None:
             if not _state["raw_content"]:
@@ -420,14 +447,14 @@ def build_proposal_tab() -> None:  # noqa: C901
         export_default_btn.on_click(_export_default)
         export_saveas_btn.on_click(_export_saveas)
 
-        # ── Load saved content (after all handlers defined) ──────────────
+        # -- Load saved content --
         pid = nicegui_app.storage.user.get("current_project_id")
         if pid:
             saved = get_latest_content(pid, content_type="proposal")
             if saved:
                 _state["raw_content"] = saved["content"]
                 _state["sections"] = parse_proposal_sections(saved["content"])
-                _render_sections_now()  # uses _regen_section via closure
+                _render_sections_now()
 
 
 def _render_sections(
@@ -452,23 +479,17 @@ def _render_sections(
                 f"{section_num}. {section_name}",
                 icon="article",
                 value=True,
-            ).classes("w-full bg-gray-50"):
-                md_widget = ui.markdown(body).classes("w-full")
-                edit_area = ui.textarea(value=body).classes("w-full hidden").props("rows=10")
+            ).classes("w-full dg-expansion"):
+                md_widget = ui.markdown(body).classes("w-full dg-prose")
+                edit_area = ui.textarea(value=body).classes("w-full hidden dg-input").props("rows=10 outlined")
 
                 with ui.row().classes("gap-2 mt-2"):
-                    # Toggle edit
-                    edit_btn = ui.button("편집", icon="edit", color="grey").props("flat size=sm")
-                    save_btn = ui.button("편집 완료", icon="check", color="green").props("flat size=sm").classes("hidden")
-                    regen_btn = ui.button("재생성", icon="refresh", color="orange").props("flat size=sm")
+                    edit_btn = ui.button("편집", icon="edit").classes("dg-btn-ghost dg-btn-sm")
+                    save_btn = ui.button("편집 완료", icon="check").classes("dg-btn-success dg-btn-sm hidden")
+                    regen_btn = ui.button("재생성", icon="refresh").classes("dg-btn-ghost dg-btn-sm")
 
                     def _toggle_edit(
-                        _e,
-                        _md=md_widget,
-                        _ea=edit_area,
-                        _eb=edit_btn,
-                        _sb=save_btn,
-                        _key=key,
+                        _e, _md=md_widget, _ea=edit_area, _eb=edit_btn, _sb=save_btn, _key=key,
                     ) -> None:
                         _md.classes("hidden", remove=False)
                         _ea.classes(remove="hidden")
@@ -476,13 +497,8 @@ def _render_sections(
                         _sb.classes(remove="hidden")
 
                     def _save_edit(
-                        _e,
-                        _md=md_widget,
-                        _ea=edit_area,
-                        _eb=edit_btn,
-                        _sb=save_btn,
-                        _key=key,
-                        _full_md=full_md,
+                        _e, _md=md_widget, _ea=edit_area, _eb=edit_btn, _sb=save_btn,
+                        _key=key, _full_md=full_md,
                     ) -> None:
                         new_text = _ea.value
                         state["sections"][_key] = new_text
@@ -491,7 +507,6 @@ def _render_sections(
                         _ea.classes("hidden", remove=False)
                         _sb.classes("hidden", remove=False)
                         _eb.classes(remove="hidden")
-                        # Rebuild raw
                         parts = []
                         for i, k in enumerate(_PROPOSAL_SECTION_KEYS):
                             n = _PROPOSAL_SECTION_NAMES[k]
@@ -499,7 +514,6 @@ def _render_sections(
                             parts.append(f"## {i + 1}. {n}\n{b}")
                         state["raw_content"] = "\n\n".join(parts)
                         _full_md.set_content(state["raw_content"])
-                        # Save to DB
                         p_id = nicegui_app.storage.user.get("current_project_id")
                         if p_id:
                             save_generated_content(p_id, "edited", state["raw_content"], content_type="proposal")
@@ -509,5 +523,5 @@ def _render_sections(
                     save_btn.on_click(_save_edit)
                     if regen_fn is not None:
                         regen_btn.on_click(
-                            lambda _e, _key=key: asyncio.ensure_future(regen_fn(_key))
+                            lambda _e, _key=key: regen_fn(_key)
                         )

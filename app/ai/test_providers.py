@@ -33,7 +33,7 @@ class TestClaudeProvider(unittest.TestCase):
         self.assertEqual(result, "AI가 작성한 보고서 내용입니다.")
         mock_client.messages.create.assert_called_once_with(
             model=provider._model,
-            max_tokens=8192,
+            max_tokens=16384,
             messages=[{"role": "user", "content": "테스트 프롬프트"}],
         )
 
@@ -286,7 +286,7 @@ class TestGeminiStability(unittest.TestCase):
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
     @patch("google.genai.Client")
     def test_gemini_max_output_tokens_in_config(self, mock_client_cls):
-        """generate_text() should include max_output_tokens=8192 in config."""
+        """generate_text() should include max_output_tokens=16384 in config."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_response = MagicMock()
@@ -299,7 +299,7 @@ class TestGeminiStability(unittest.TestCase):
 
         call_kwargs = mock_client.models.generate_content.call_args[1]
         config = call_kwargs["config"]
-        self.assertEqual(config.max_output_tokens, 8192)
+        self.assertEqual(config.max_output_tokens, 16384)
 
     def test_gemini_import_error_message(self):
         """google-genai 미설치 시 친절한 ImportError 메시지를 보여줘야 한다."""

@@ -1,11 +1,12 @@
-"""Screen 4 – 썸네일 이미지 생성 (Gemini Image Generation)."""
+"""Screen 4 -- 썸네일 이미지 생성 (Gemini Image Generation)."""
 import asyncio
 import base64
 from datetime import datetime
 
 from nicegui import ui
 
-from app.common import create_nav, create_log_panel, create_path_info_panel
+from app.common import create_nav
+from app.theme import section_header
 from app.export_manager import ExportManager
 from app.paths import THUMBNAILS_DIR, sanitize_filename
 from app.logger import get_logger
@@ -22,29 +23,27 @@ def thumbnail_page() -> None:
         "ref_mime": "image/png",
         "result_bytes": None,
         "result_mime": "image/png",
-        "history": [],  # list of (bytes, mime, prompt_snippet)
+        "history": [],
     }
     _MAX_HISTORY = 10
 
-    with ui.column().classes("w-full p-6 gap-4"):
+    with ui.column().classes("dg-page-content w-full gap-5"):
 
-        # ── 안내 카드 ────────────────────────────────────────────
-        with ui.card().classes("w-full bg-orange-50"):
-            with ui.row().classes("items-center gap-3"):
-                ui.icon("image", size="28px").classes("text-orange-500")
-                with ui.column().classes("gap-0"):
-                    ui.label("썸네일 이미지 생성").classes("font-bold text-gray-700")
-                    ui.label(
-                        "Gemini AI로 당근 광고용 썸네일 이미지를 생성합니다. "
-                        "참고 이미지(선택)와 프롬프트를 입력하세요."
-                    ).classes("text-sm text-gray-500")
+        # Page header
+        ui.label("썸네일 제작").classes("dg-page-title")
+        ui.label("Gemini AI로 당근 광고용 썸네일 이미지를 생성합니다.").classes("dg-page-subtitle")
 
-        # ── 참고 이미지 (선택) ────────────────────────────────────
-        with ui.card().classes("w-full"):
-            ui.label("참고 이미지 (선택)").classes("font-bold text-gray-700 mb-2")
+        # -- Guide banner --
+        with ui.element("div").classes("dg-banner dg-banner-info w-full"):
+            ui.icon("lightbulb", size="20px")
             ui.label(
-                "스타일 참고용 이미지를 업로드하면 비슷한 분위기로 생성합니다."
-            ).classes("text-xs text-gray-400 mb-2")
+                "참고 이미지(선택)와 프롬프트를 입력하면 AI가 썸네일을 생성합니다. "
+                "분위기, 색상, 문구, 이미지 요소를 구체적으로 적을수록 좋습니다."
+            )
+
+        # -- Reference image --
+        with ui.card().classes("dg-card w-full"):
+            section_header("add_photo_alternate", "참고 이미지", "스타일 참고용 이미지를 업로드하면 비슷한 분위기로 생성합니다.")
 
             ref_preview = ui.column().classes("w-full hidden")
 
@@ -52,66 +51,62 @@ def thumbnail_page() -> None:
                 ref_upload = ui.upload(
                     label="이미지 선택",
                     auto_upload=True,
-                    on_upload=lambda e: asyncio.ensure_future(_handle_ref_upload(e)),
-                ).classes("max-w-xs").props('accept="image/*"')
+                    on_upload=lambda e: _handle_ref_upload(e),
+                ).classes("max-w-xs dg-upload").props('accept="image/*"')
 
                 ref_clear_btn = ui.button(
-                    "제거",
+                    "제거", icon="close",
                     on_click=lambda: _clear_ref(),
-                ).classes("bg-gray-200 text-gray-700 text-sm hidden")
+                ).classes("dg-btn-secondary dg-btn-sm hidden")
 
-        # ── 프롬프트 입력 ────────────────────────────────────────
-        with ui.card().classes("w-full"):
-            ui.label("프롬프트 입력").classes("font-bold text-gray-700 mb-2")
+        # -- Prompt input --
+        with ui.card().classes("dg-card w-full"):
+            section_header("text_fields", "프롬프트 입력")
             prompt_input = ui.textarea(
                 placeholder=(
                     "예: 당근마켓 스타일의 따뜻한 오렌지톤 썸네일, "
                     "\"신선한 제철 과일 50% 할인\" 문구 포함, "
-                    "밝고 친근한 분위기\n\n"
-                    "팁: 원하는 분위기(밝은/따뜻한/깔끔한), 색상(오렌지/초록/파랑), "
-                    "문구, 이미지 요소(음식/사람/아이콘)를 구체적으로 적을수록 좋습니다."
+                    "밝고 친근한 분위기"
                 ),
-            ).classes("w-full").props("rows=5 outlined")
+            ).classes("w-full dg-input").props("rows=4 outlined")
 
             name_input = ui.input(
                 label="파일명 (선택)",
                 placeholder="예: 과일할인_썸네일",
-            ).classes("w-72 mt-2").props("dense outlined")
+            ).classes("w-72 mt-3 dg-input").props("dense outlined")
 
-        # ── 액션 버튼 ────────────────────────────────────────────
+        # -- Action buttons --
         with ui.row().classes("gap-3 items-center"):
             gen_btn = ui.button(
                 "썸네일 생성",
-                on_click=lambda: asyncio.ensure_future(_generate()),
-                icon="palette",
-            ).classes("bg-orange-500 text-white text-base px-6")
+                on_click=lambda: _generate(),
+                icon="auto_awesome",
+            ).classes("dg-btn-primary")
 
             save_btn = ui.button(
                 "기본 폴더에 저장",
                 on_click=lambda: _save_result(),
                 icon="save",
-            ).classes("bg-green-600 text-white text-base px-6 hidden")
+            ).classes("dg-btn-success hidden")
 
             spinner = ui.spinner(size="32px").classes("hidden")
-            status_label = ui.label("").classes("text-sm text-gray-500 hidden")
+            status_label = ui.label("").classes("dg-progress-text hidden")
 
-        # ── 생성 결과 미리보기 ────────────────────────────────────
-        result_card = ui.card().classes("w-full hidden")
-        result_container = ui.column().classes("w-full items-center gap-2")
+        # -- Result preview --
+        result_card = ui.card().classes("dg-card w-full hidden")
+        result_container = ui.column().classes("w-full items-center gap-3")
 
         with result_card:
-            ui.label("생성 결과").classes("font-bold text-gray-700 mb-2")
+            section_header("image", "생성 결과")
             result_container
 
-        # ── 이미지 히스토리 ──
-        thumb_history_label = ui.label("").classes("text-xs text-gray-400 mt-2 hidden")
+        # -- History strip --
+        thumb_history_label = ui.label("").classes("dg-label-sm mt-3 hidden")
         thumb_history_strip = ui.row().classes(
             "w-full overflow-x-auto gap-2 mt-1 hidden"
         ).style("max-height: 120px")
 
-        # ── 진단 패널 ────────────────────────────────────────────
-        create_log_panel()
-        create_path_info_panel()
+    # -- History helpers --
 
     def _refresh_history() -> None:
         history = page_state["history"]
@@ -128,9 +123,9 @@ def thumbnail_page() -> None:
                 b64 = base64.b64encode(img_bytes).decode()
                 with ui.column().classes("items-center cursor-pointer shrink-0"):
                     ui.image(f"data:{mime};base64,{b64}").classes(
-                        "w-20 h-20 object-cover rounded border"
+                        "w-20 h-20 object-cover rounded-lg dg-history-item"
                     ).on("click", lambda _, i=idx: _restore_history(i))
-                    ui.label(snippet[:12]).classes("text-xs text-gray-400 truncate max-w-20")
+                    ui.label(snippet[:12]).classes("dg-label-sm truncate max-w-20")
 
     def _restore_history(idx: int) -> None:
         history = page_state["history"]
@@ -142,15 +137,13 @@ def thumbnail_page() -> None:
         b64 = base64.b64encode(img_bytes).decode()
         result_container.clear()
         with result_container:
-            ui.image(f"data:{mime};base64,{b64}").classes("max-w-lg rounded shadow")
-            ui.label(f"{len(img_bytes):,} bytes | 복원: {snippet[:20]}").classes(
-                "text-xs text-gray-400"
-            )
+            ui.image(f"data:{mime};base64,{b64}").classes("max-w-lg dg-image-preview")
+            ui.label(f"{len(img_bytes):,} bytes | 복원: {snippet[:20]}").classes("dg-label-sm")
         result_card.classes(remove="hidden")
         save_btn.classes(remove="hidden")
         ui.notify(f"이미지 복원됨: {snippet[:20]}", type="info", timeout=2000)
 
-    # ── 핸들러 ────────────────────────────────────────────────────
+    # -- Handlers --
 
     async def _handle_ref_upload(e) -> None:
         try:
@@ -163,10 +156,8 @@ def thumbnail_page() -> None:
             ref_preview.clear()
             ref_preview.classes(remove="hidden")
             with ref_preview:
-                ui.image(f"data:{mime};base64,{b64}").classes(
-                    "max-w-sm rounded shadow"
-                )
-                ui.label(f"{len(data):,} bytes").classes("text-xs text-gray-400")
+                ui.image(f"data:{mime};base64,{b64}").classes("max-w-sm dg-image-preview")
+                ui.label(f"{len(data):,} bytes").classes("dg-label-sm")
 
             ref_clear_btn.classes(remove="hidden")
             _log.info("참고 이미지 업로드: %s (%d bytes)", mime, len(data))
@@ -219,22 +210,16 @@ def thumbnail_page() -> None:
             page_state["result_bytes"] = img_bytes
             page_state["result_mime"] = mime
 
-            # Save to history
             snippet = prompt_text[:20]
             page_state["history"].append((img_bytes, mime, snippet))
             if len(page_state["history"]) > _MAX_HISTORY:
                 page_state["history"] = page_state["history"][-_MAX_HISTORY:]
 
-            # 결과 미리보기
             b64 = base64.b64encode(img_bytes).decode()
             result_container.clear()
             with result_container:
-                ui.image(f"data:{mime};base64,{b64}").classes(
-                    "max-w-lg rounded shadow"
-                )
-                ui.label(f"{len(img_bytes):,} bytes | {mime}").classes(
-                    "text-xs text-gray-400"
-                )
+                ui.image(f"data:{mime};base64,{b64}").classes("max-w-lg dg-image-preview")
+                ui.label(f"{len(img_bytes):,} bytes | {mime}").classes("dg-label-sm")
             result_card.classes(remove="hidden")
             save_btn.classes(remove="hidden")
 

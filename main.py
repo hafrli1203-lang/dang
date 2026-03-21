@@ -2,7 +2,7 @@
 import os
 import sys
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 
 # ── Centralized paths (platformdirs-based) ────────────────────────────────────
 from app.paths import IS_FROZEN, BUNDLE_DIR, APP_DIR, DATA_DIR, STORAGE_DIR, get_env_path, migrate_legacy_files, ensure_dirs
@@ -35,6 +35,11 @@ import app.pages.thumbnail  # noqa: F401
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 from nicegui import ui, app as nicegui_app
+
+# ── Static files (fonts, images) ──────────────────────────────────────────────
+_static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
+if os.path.isdir(_static_dir):
+    nicegui_app.add_static_files("/static", _static_dir)
 
 storage_secret = os.getenv("STORAGE_SECRET", "daangn-reporter-default-secret")
 
@@ -78,10 +83,10 @@ if __name__ in ("__main__", "__mp_main__"):
 
     if not native_available:
         print("\n[안내] 브라우저 모드로 실행합니다.", file=sys.stderr)
-        print("브라우저에서  http://localhost:8080  을 열어주세요.\n", file=sys.stderr)
+        print("브라우저에서  http://localhost:8000  을 열어주세요.\n", file=sys.stderr)
         ui.run(
             native=False,
-            port=8080,
+            port=8000,
             show=True,
             title="당근 광고 기획 도우미",
             storage_secret=storage_secret,

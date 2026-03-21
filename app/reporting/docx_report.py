@@ -43,7 +43,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Cm, Inches, Pt, RGBColor
 
 try:
     from typing import TypedDict
@@ -1400,31 +1400,89 @@ def _build_advertiser_profile(doc: Document, project_meta: ProjectMeta) -> None:
 
 
 def _render_md_body(doc: Document, text: str) -> None:
-    """마크다운 텍스트를 Normal/bullet/bold 단락으로 렌더링 (기획 요약 등 본문용)."""
-    for line in text.split("\n"):
-        s = line.rstrip()
+    """마크다운 텍스트를 Normal/bullet/bold/table 단락으로 렌더링 (기획 요약 등 본문용)."""
+
+    def _clean_md_text(t: str) -> str:
+        t = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', t)
+        t = re.sub(r'\*\*(.+?)\*\*', r'\1', t)
+        t = re.sub(r'\*(.+?)\*', r'\1', t)
+        return t.replace('`', '')
+
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        s = lines[i].rstrip()
         if not s:
+            i += 1
             continue
+
+        # 마크다운 표 감지
+        if s.startswith("|") and "|" in s[1:]:
+            table_lines = []
+            while i < len(lines) and lines[i].rstrip().startswith("|"):
+                line = lines[i].rstrip()
+                # 구분선(|---|---|) 건너뛰기
+                if not re.match(r'^\|[\s\-:]+\|', line):
+                    table_lines.append(line)
+                i += 1
+
+            if table_lines:
+                headers = [_clean_md_text(cell.strip()) for cell in table_lines[0].split('|') if cell.strip()]
+                if headers:
+                    tbl = doc.add_table(rows=1, cols=len(headers))
+                    try:
+                        tbl.style = "Table Grid"
+                    except KeyError:
+                        pass
+
+                    # 헤더 행
+                    for j, header in enumerate(headers):
+                        cell = tbl.rows[0].cells[j]
+                        cell.text = header
+                        _set_cell_bg(cell, "FFF3E0")
+                        for p in cell.paragraphs:
+                            for r in p.runs:
+                                r.bold = True
+                                r.font.size = Pt(9)
+
+                    # 데이터 행
+                    for row_line in table_lines[1:]:
+                        cells = [_clean_md_text(cell.strip()) for cell in row_line.split('|') if cell.strip()]
+                        row = tbl.add_row()
+                        for j, cell_text in enumerate(cells):
+                            if j < len(headers):
+                                row.cells[j].text = cell_text
+                                for p in row.cells[j].paragraphs:
+                                    for r in p.runs:
+                                        r.font.size = Pt(9)
+
+                    # 열 너비 설정
+                    col_width = Cm(16) / len(headers)
+                    for row in tbl.rows:
+                        for cell in row.cells:
+                            cell.width = col_width
+
+                    doc.add_paragraph()  # 표 후 간격
+            continue
+
         if s.startswith("### "):
-            p = doc.add_paragraph(s[4:])
+            p = doc.add_paragraph(_clean_md_text(s[4:]))
             for r in p.runs:
                 r.font.bold = True
                 r.font.size = Pt(11)
                 r.font.color.rgb = RGBColor(0x37, 0x47, 0x4F)
         elif s.startswith("- ") or s.startswith("* "):
-            p = doc.add_paragraph(s[2:], style="List Bullet")
+            p = doc.add_paragraph(_clean_md_text(s[2:]), style="List Bullet")
             for r in p.runs:
                 r.font.size = Pt(10.5)
         elif s.startswith("---"):
             _add_divider(doc, color="DDDDDD")
-        elif s.startswith("|"):
-            p = doc.add_paragraph(s)
-            for r in p.runs:
-                r.font.size = Pt(9)
         else:
-            p = doc.add_paragraph(s)
+            p = doc.add_paragraph(_clean_md_text(s))
             for r in p.runs:
                 r.font.size = Pt(10.5)
+
+        i += 1
 
 
 def _build_planning_body(doc: Document, ai_content: str) -> None:
@@ -1447,13 +1505,9 @@ def _build_planning_body(doc: Document, ai_content: str) -> None:
             lower = header.lower()
 
             if "소식글" in lower:
-                for line in body.split("\n"):
-                    if line.strip():
-                        doc.add_paragraph(line.strip())
+                _render_md_body(doc, body)
             elif "카피" in lower:
-                for line in body.split("\n"):
-                    if line.strip():
-                        doc.add_paragraph(line.strip())
+                _render_md_body(doc, body)
             else:
                 _render_md_body(doc, body)
 

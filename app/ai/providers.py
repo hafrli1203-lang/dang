@@ -125,7 +125,7 @@ class ClaudeProvider(BaseProvider):
         self,
         api_key: str | None = None,
         model: str | None = None,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
     ) -> None:
         import anthropic
 
@@ -210,7 +210,7 @@ class GeminiProvider(BaseProvider):
 
     def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
         from google.genai import types
-        config_kwargs: dict = {"max_output_tokens": 8192}
+        config_kwargs: dict = {"max_output_tokens": 16384}
         if system_prompt:
             config_kwargs["system_instruction"] = system_prompt
         kwargs: dict = dict(
@@ -240,7 +240,7 @@ class GeminiProvider(BaseProvider):
         self, prompt: str, *, system_prompt: str | None = None
     ) -> Generator[str, None, None]:
         from google.genai import types
-        config_kwargs: dict = {"max_output_tokens": 8192}
+        config_kwargs: dict = {"max_output_tokens": 16384}
         if system_prompt:
             config_kwargs["system_instruction"] = system_prompt
         kwargs: dict = dict(

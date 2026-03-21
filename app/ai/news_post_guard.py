@@ -24,18 +24,20 @@ from typing import Dict, List, Tuple
 FORCED_TEMPLATE = r"""
 [INSTRUCTION]
 - 당신의 출력은 "당근 비즈프로필 소식글" 최종본입니다. 설명/해설/사과/추가 제안 금지.
-- 반드시 아래 "출력 포맷"을 100% 그대로 지키세요. (섹션명/이모지/순서 고정)
 - 반드시 2개 버전을 모두 출력하세요:
-  - (1) 의심해소형: '정말 0원이냐' 의심 제거 + 조건/제외/추가금 가능 항목을 투명하게 안내
-  - (2) 가성비형: '이 가격에 이 구성?' 논리적 이득 납득 + 구성/혜택/비교 포인트 강조
-- 확인 불가한 사실(상세 주소/영업시간/주차/가격 범위 등)은 절대 임의로 만들지 말고
-  반드시 [[확인 필요: ...]] 형태로 표시하세요.
-- 과장/단정 금지: "무조건", "전부", "절대 추가금 없음", "100%" 같은 단정은 금지.
-  대신 "기본 범위 내", "케이스별 안내", "특수옵션은 추가금 가능" 형태로 안전하게 작성.
+  - (1) 의심해소형: 소비자의 의심/불안을 먼저 꺼내고 → 사실/경험으로 해소
+  - (2) 가성비형: "이 가격에 이 구성?" 경제적 이득을 논리적으로 납득시킴
+- 소식글은 '광고'가 아니라 '이웃에게 보내는 진심 어린 소식'이어야 합니다.
+  읽는 사람이 "오, 한번 가봐야겠다"라고 느끼도록 매력적으로 작성하세요.
+- 과장/단정 금지: "무조건", "전부", "100%" 같은 단정은 금지.
+  대신 구체적 사실, 숫자, 경험으로 설득하세요.
 - 본문은 모바일 가독성: 2~4줄마다 줄바꿈.
-- 각 버전마다 CTA는 반드시 3회(상/중/하) 들어가야 합니다.
-- 각 버전마다 FAQ는 최소 4문항(Q/A)로 작성.
-- 각 버전마다 고지(유의사항) 섹션에 "특수옵션/추가금 가능" 문구를 반드시 포함.
+- 각 버전 제목 위에 쿠폰/혜택 훅 문구를 배치. 예: "쿠폰부터 받고 읽어주세요!"
+- 각 버전마다 CTA를 2~3회 자연스럽게 배치 (본문 흐름 속에).
+  CTA는 "채팅 주세요", "문의 주세요" 등 부드러운 표현 사용.
+- 법적 면책 조항, 유의사항, 고지 섹션은 넣지 마세요.
+  소식글은 고객을 끌어들이는 글입니다. 딱딱한 안내문이 아닙니다.
+- 매장 위치는 본문 마무리에 자연스럽게 1줄로 녹이세요.
 
 [INPUT DATA]
 - 상호명: {{store_name}}
@@ -45,93 +47,35 @@ FORCED_TEMPLATE = r"""
 - 적용 조건(있으면): {{offer_condition}}
 - 기간: {{period}}
 - 추가 혜택(있으면): {{extra_benefit}}
-- 문의 유도(기본): "채팅으로 문의 주시면 1분 내 안내"
-- 영업시간: {{hours}}
-- 주차: {{parking}}
-- 제외/추가금 가능 항목(있으면): {{extra_cost_items}}
 
 [OUTPUT FORMAT - MUST FOLLOW EXACTLY]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 【소식글 1 | 의심해소형】
-제목: (15~30자, 문장부호 1개 이상)
+쿠폰/혜택 훅 문구 1줄
+
+제목: (15~30자, 궁금증/혜택/숫자 포함)
 
 (상단 훅 2~4줄: 의심을 먼저 인정하고 멈칫하게 만들기)
 
-💬 빠른 문의 (상단 CTA)
-- (딱 1~2줄, 문의 유도)
+(본문: 의심 포인트 제시 → 구체적 사실/숫자/경험으로 해소 → 추가 신뢰 근거)
+(총 15~25줄, 2~4줄마다 빈 줄로 구분)
+(CTA를 본문 중간과 끝에 자연스럽게 배치)
 
-(본문 1: 오퍼를 1문장으로 확정 + 조건을 짧게)
-(본문 2: "왜 의심해도 되는지 → 그래서 이렇게 투명하게 안내한다" 흐름)
-(본문 3: 고객이 걱정하는 포인트 3개를 '먼저' 꺼내서 해소)
-(본문 4: 추가 혜택/당근 보고 왔다 혜택/단골·쿠폰 유도 중 1~2개만)
+{{region}} 에서 만나요!
 
-💬 빠른 문의 (중단 CTA)
-- (딱 1~2줄, 지금 바로 채팅 유도)
 
-❓ 자주 묻는 질문(FAQ)
-Q1. …
-A1. …
-Q2. …
-A2. …
-Q3. …
-A3. …
-Q4. …
-A4. …
-
-※ 꼭 읽어주세요 (고지/유의사항)
-- 기본 혜택 범위: …
-- 특수옵션은 케이스별 추가금이 있을 수 있음
-- 정확한 적용 범위/비용은 상담 후 최종 안내
-
-📍 매장 정보
-- 위치: {{region}} / [[확인 필요: 상세 주소]]
-- 영업시간: {{hours}} / [[확인 필요: 정확한 시간]]
-- 주차: {{parking}} / [[확인 필요: 주차 안내]]
-- 문의: 채팅
-
-💬 빠른 문의 (하단 CTA)
-- (핵심 키워드 1개를 넣어서 한 줄로 마무리)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【소식글 2 | 가성비형】
-제목: (15~30자, 문장부호 1개 이상)
+쿠폰/혜택 훅 문구 1줄
 
-(상단 훅 2~4줄: "이 가격에 이 구성?" 충격/독백/팩트형 중 택1)
+제목: (15~30자, 가격/구성 충격 포함)
 
-💬 빠른 문의 (상단 CTA)
-- (딱 1~2줄)
+(상단 훅 2~4줄: "이 가격에 이 구성?" 충격/팩트형)
 
-(본문 1: '구성/혜택' 목록을 "짧은 줄"로 툭툭 나열)
-(본문 2: 왜 이렇게 하는지(철학/명분) 2~4줄)
-(본문 3: 현장 반응 2~4줄)
-(본문 4: 방문 장벽 제거(위치/주차/예약) 안내)
+(본문: 구성/혜택 구체 나열 → 왜 이 가격인지 이유 → 현장 반응/후기)
+(총 15~25줄, 2~4줄마다 빈 줄로 구분)
+(CTA를 본문 중간과 끝에 자연스럽게 배치)
 
-💬 빠른 문의 (중단 CTA)
-- (딱 1~2줄)
-
-❓ 자주 묻는 질문(FAQ)
-Q1. …
-A1. …
-Q2. …
-A2. …
-Q3. …
-A3. …
-Q4. …
-A4. …
-
-※ 꼭 읽어주세요 (고지/유의사항)
-- 기본 혜택 범위: …
-- 특수옵션은 케이스별 추가금이 있을 수 있음
-- 정확한 적용 범위/비용은 상담 후 최종 안내
-
-📍 매장 정보
-- 위치: {{region}} / [[확인 필요: 상세 주소]]
-- 영업시간: {{hours}} / [[확인 필요: 정확한 시간]]
-- 주차: {{parking}} / [[확인 필요: 주차 안내]]
-- 문의: 채팅
-
-💬 빠른 문의 (하단 CTA)
-- (한 줄 마무리)
+{{region}} 에서 만나요!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """.strip()
@@ -144,11 +88,9 @@ A4. …
 VALIDATION_RULES: Dict[str, str] = {
     "block_headers": '【소식글 1 | 의심해소형】 + 【소식글 2 | 가성비형】 모두 존재',
     "title": '각 블록에 "제목: .+" 존재',
-    "cta_3x": '각 블록에 💬 빠른 문의 (상단/중단/하단 CTA) 3회',
-    "faq_4q": '각 블록에 ❓ FAQ + Q1~Q4/A1~A4',
-    "notice": '※ 꼭 읽어주세요 + "추가금" 키워드',
-    "store_info": '📍 매장 정보 존재',
-    "body_length": '각 블록 본문 최소 900자',
+    "coupon_hook": '각 블록에 쿠폰/혜택 훅 키워드 존재 (👆, 쿠폰)',
+    "cta_2x": '각 블록에 CTA 2회 이상 (채팅/문의/확인 등)',
+    "body_length": '각 블록 본문 최소 500자',
     "line_breaks": '각 블록 최소 14개 줄바꿈',
     "forbidden": '"무조건", "전부", "절대 추가금 없음", "100%" 금지',
 }
@@ -166,22 +108,9 @@ _BLOCK_SPLIT_RE = re.compile(
 
 _TITLE_RE = re.compile(r"제목:\s*(.+)")
 
-_CTA_RE = {
-    "상단": re.compile(r"💬\s*빠른 문의\s*\(상단 CTA\)"),
-    "중단": re.compile(r"💬\s*빠른 문의\s*\(중단 CTA\)"),
-    "하단": re.compile(r"💬\s*빠른 문의\s*\(하단 CTA\)"),
-}
-
-_FAQ_HEADER_RE = re.compile(r"❓\s*자주 묻는 질문\s*\(?FAQ\)?")
-_FAQ_QA_RE = {
-    i: re.compile(rf"Q{i}\.\s*.+\nA{i}\.\s*.+", re.MULTILINE)
-    for i in range(1, 5)
-}
-
-_NOTICE_HEADER_RE = re.compile(r"※\s*꼭 읽어주세요\s*\(고지/유의사항\)")
-_NOTICE_EXTRA_RE = re.compile(r"추가금")
-
-_STORE_INFO_RE = re.compile(r"📍\s*매장 정보")
+_CTA_RE = re.compile(
+    r"채팅|문의|확인해\s*보세요|상담|예약|방문",
+)
 
 _FORBIDDEN_WORDS = ["무조건", "전부", "절대 추가금 없음", "100%"]
 
@@ -203,31 +132,14 @@ def _split_blocks(text: str) -> Dict[str, str]:
 
 
 def _extract_body_text(block: str) -> str:
-    """블록에서 헤더/FAQ/고지/매장정보/CTA 라인을 제외한 순수 본문."""
+    """블록에서 제목 라인을 제외한 순수 본문."""
     lines = block.splitlines()
     body_lines: list[str] = []
-    skip_section = False
     for line in lines:
         stripped = line.strip()
-        # 섹션 헤더 감지 → skip
-        if any(p.search(stripped) for p in [
-            _FAQ_HEADER_RE, _NOTICE_HEADER_RE, _STORE_INFO_RE,
-        ]):
-            skip_section = True
-            continue
-        if any(p.search(stripped) for p in _CTA_RE.values()):
-            skip_section = True
-            continue
         if _TITLE_RE.match(stripped):
             continue
-        # 새 섹션이 아닌 빈 줄은 skip 해제
-        if skip_section:
-            if stripped == "" or stripped.startswith("-") or stripped.startswith("Q") or stripped.startswith("A"):
-                continue
-            # 본문처럼 보이는 줄이면 skip 해제
-            if not stripped.startswith("━"):
-                skip_section = False
-        if not skip_section and stripped and not stripped.startswith("━"):
+        if stripped and not stripped.startswith("━"):
             body_lines.append(line)
     return "\n".join(body_lines)
 
@@ -261,34 +173,20 @@ def validate_news_post(text: str) -> Tuple[bool, List[str]]:
         if not _TITLE_RE.search(block):
             errors.append(f"{prefix} 제목 누락 (\"제목: ...\" 형식 필요)")
 
-        # ── CTA 3회 ──
-        for pos, rx in _CTA_RE.items():
-            if not rx.search(block):
-                errors.append(f"{prefix} 💬 빠른 문의 ({pos} CTA) 누락")
+        # ── 쿠폰/혜택 훅 ──
+        if "👆" not in block and "쿠폰" not in block:
+            errors.append(f"{prefix} 쿠폰/혜택 훅 문구 누락 (👆 또는 쿠폰 키워드 필요)")
 
-        # ── FAQ ──
-        if not _FAQ_HEADER_RE.search(block):
-            errors.append(f"{prefix} ❓ FAQ 섹션 누락")
-        else:
-            for i in range(1, 5):
-                if not _FAQ_QA_RE[i].search(block):
-                    errors.append(f"{prefix} FAQ Q{i}/A{i} 누락")
+        # ── CTA 2회 ──
+        cta_count = len(_CTA_RE.findall(block))
+        if cta_count < 2:
+            errors.append(f"{prefix} CTA 부족 (최소 2회 필요, 현재 {cta_count}회)")
 
-        # ── 고지 ──
-        if not _NOTICE_HEADER_RE.search(block):
-            errors.append(f"{prefix} ※ 고지/유의사항 섹션 누락")
-        elif not _NOTICE_EXTRA_RE.search(block):
-            errors.append(f"{prefix} 고지에 '추가금' 키워드 누락")
-
-        # ── 매장 정보 ──
-        if not _STORE_INFO_RE.search(block):
-            errors.append(f"{prefix} 📍 매장 정보 섹션 누락")
-
-        # ── 본문 길이 (헤더/FAQ/고지/매장/CTA 제외) ──
+        # ── 본문 길이 (헤더/고지/매장/CTA 제외) ──
         body_text = _extract_body_text(block)
         body_len = len(body_text.replace(" ", "").replace("\n", ""))
-        if body_len < 900:
-            errors.append(f"{prefix} 본문 너무 짧음 (최소 900자 필요, 현재 {body_len}자)")
+        if body_len < 500:
+            errors.append(f"{prefix} 본문 너무 짧음 (최소 500자 필요, 현재 {body_len}자)")
 
         # ── 줄바꿈 (모바일 가독성) ──
         newline_count = block.count("\n")
@@ -345,16 +243,13 @@ def format_forced_template(project: dict, extra: str = "") -> str:
     offer = benefits if benefits else goal
 
     replacements = {
-        "{{store_name}}": project.get("name", "[[확인 필요: 상호명]]"),
-        "{{region}}": project.get("region", "[[확인 필요: 지역]]"),
-        "{{industry}}": project.get("industry", "[[확인 필요: 업종]]"),
-        "{{offer}}": offer or "[[확인 필요: 핵심 혜택]]",
-        "{{offer_condition}}": extra.strip() if extra.strip() else "[[확인 필요: 적용 조건]]",
-        "{{period}}": project.get("period", "[[확인 필요: 기간]]"),
-        "{{extra_benefit}}": benefits or "[[확인 필요: 추가 혜택]]",
-        "{{hours}}": "[[확인 필요: 영업시간]]",
-        "{{parking}}": "[[확인 필요: 주차]]",
-        "{{extra_cost_items}}": "[[확인 필요: 제외/추가금 항목]]",
+        "{{store_name}}": project.get("name", "(상호명)"),
+        "{{region}}": project.get("region", "(지역)"),
+        "{{industry}}": project.get("industry", "(업종)"),
+        "{{offer}}": offer or "(핵심 혜택)",
+        "{{offer_condition}}": extra.strip() if extra.strip() else "(조건 없음)",
+        "{{period}}": project.get("period", "(기간 미정)"),
+        "{{extra_benefit}}": benefits or "(없음)",
     }
 
     result = FORCED_TEMPLATE
@@ -372,12 +267,9 @@ def _build_input_data_block(project: dict, extra: str = "") -> str:
         f"- 위치(동네/구): {project.get('region', '')}\n"
         f"- 업종/카테고리: {project.get('industry', '')}\n"
         f"- 행사/핵심 혜택(오퍼): {benefits or goal}\n"
-        f"- 적용 조건: {extra.strip() or '[[확인 필요]]'}\n"
+        f"- 적용 조건: {extra.strip() or '(조건 없음)'}\n"
         f"- 기간: {project.get('period', '')}\n"
-        f"- 추가 혜택: {benefits or '[[확인 필요]]'}\n"
-        f"- 영업시간: [[확인 필요]]\n"
-        f"- 주차: [[확인 필요]]\n"
-        f"- 제외/추가금: [[확인 필요]]"
+        f"- 추가 혜택: {benefits or '(없음)'}"
     )
 
 

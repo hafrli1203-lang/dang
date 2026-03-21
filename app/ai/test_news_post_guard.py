@@ -19,44 +19,20 @@ from app.ai.news_post_guard import (
 _BODY_PAD = "동네에서 가장 정성스러운 빵을 만드는 곳이에요. 채팅으로 문의 주시면 바로 안내해드립니다.\n" * 25
 
 _GOOD_BLOCK = """\
+👆 쿠폰부터 받고 글을 읽어주세요! 👆
+
 제목: 동네 빵집, 이 가격에 이 퀄리티?
 
 요즘 빵값 너무 비싸지 않으셨어요?
 저희 매장은 매일 새벽 반죽합니다.
 
-💬 빠른 문의 (상단 CTA)
-- 채팅으로 문의 주시면 1분 내 안내해드려요!
-
 {body_pad}
 오늘 갓 구운 빵이 준비되어 있습니다.
 채팅으로 문의 주시면 예약도 도와드려요.
 
-💬 빠른 문의 (중단 CTA)
-- 지금 바로 채팅으로 문의해보세요!
+궁금한 점 있으시면 편하게 채팅 주세요!
 
-❓ 자주 묻는 질문(FAQ)
-Q1. 주차가 되나요?
-A1. 네, 매장 앞 2대 가능합니다.
-Q2. 예약이 필요한가요?
-A2. 아니요, 선착순이에요.
-Q3. 글루텐프리 빵도 있나요?
-A3. 네, 3종류 준비되어 있어요.
-Q4. 배달도 되나요?
-A4. 반경 2km 이내 배달 가능합니다.
-
-※ 꼭 읽어주세요 (고지/유의사항)
-- 기본 혜택 범위: 일반 식빵/크로아상/바게트
-- 특수옵션(글루텐프리/비건)은 케이스별 추가금이 있을 수 있음
-- 정확한 적용 범위/비용은 매장 상담 후 최종 안내
-
-📍 매장 정보
-- 위치: 강남구 / [[확인 필요: 상세 주소]]
-- 영업시간: [[확인 필요: 정확한 시간]]
-- 주차: [[확인 필요: 주차 안내]]
-- 문의: 채팅
-
-💬 빠른 문의 (하단 CTA)
-- 매일 새벽 반죽 빵, 지금 채팅으로 확인하세요!
+강남구에서 만나요!
 """.format(body_pad=_BODY_PAD)
 
 _GOOD_OUTPUT = f"""\
@@ -100,7 +76,7 @@ class TestFormatForcedTemplate(unittest.TestCase):
 
     def test_missing_fields_get_placeholder(self):
         result = format_forced_template({})
-        self.assertIn("[[확인 필요", result)
+        self.assertIn("(상호명)", result)
 
 
 class TestValidateNewsPost(unittest.TestCase):
@@ -124,46 +100,20 @@ class TestValidateNewsPost(unittest.TestCase):
         self.assertTrue(any("가성비" in e for e in errors))
 
     def test_short_body_fails(self):
-        """본문 900자 미만."""
+        """본문 500자 미만."""
         short = _GOOD_OUTPUT.replace(_BODY_PAD, "짧은 본문.\n")
         ok, errors = validate_news_post(short)
         self.assertFalse(ok)
-        self.assertTrue(any("900자" in e for e in errors), f"본문 길이 미달이 잡히지 않음: {errors}")
+        self.assertTrue(any("500자" in e for e in errors), f"본문 길이 미달이 잡히지 않음: {errors}")
 
     def test_missing_cta_fails(self):
-        """중단 CTA 누락."""
-        no_mid_cta = _GOOD_OUTPUT.replace("💬 빠른 문의 (중단 CTA)", "")
-        ok, errors = validate_news_post(no_mid_cta)
+        """CTA 2회 미만 감지."""
+        # 채팅/문의 키워드를 모두 제거하면 CTA 0회
+        no_cta = _GOOD_OUTPUT.replace("채팅", "연락").replace("문의", "연락").replace("확인해", "봐")
+        ok, errors = validate_news_post(no_cta)
         self.assertFalse(ok)
-        self.assertTrue(any("중단 CTA" in e for e in errors))
+        self.assertTrue(any("CTA 부족" in e for e in errors))
 
-    def test_missing_faq_fails(self):
-        """FAQ Q3/A3 누락."""
-        no_q3 = _GOOD_OUTPUT.replace("Q3. 글루텐프리 빵도 있나요?\nA3. 네, 3종류 준비되어 있어요.", "")
-        ok, errors = validate_news_post(no_q3)
-        self.assertFalse(ok)
-        self.assertTrue(any("Q3" in e for e in errors))
-
-    def test_missing_notice_fails(self):
-        """고지 섹션 누락."""
-        no_notice = _GOOD_OUTPUT.replace("※ 꼭 읽어주세요 (고지/유의사항)", "참고사항")
-        ok, errors = validate_news_post(no_notice)
-        self.assertFalse(ok)
-        self.assertTrue(any("고지" in e for e in errors))
-
-    def test_notice_missing_keyword_fails(self):
-        """고지에 '추가금' 키워드 없음."""
-        no_kw = _GOOD_OUTPUT.replace("추가금", "비용")
-        ok, errors = validate_news_post(no_kw)
-        self.assertFalse(ok)
-        self.assertTrue(any("추가금" in e for e in errors))
-
-    def test_missing_store_info_fails(self):
-        """매장 정보 섹션 누락."""
-        no_store = _GOOD_OUTPUT.replace("📍 매장 정보", "가게 안내")
-        ok, errors = validate_news_post(no_store)
-        self.assertFalse(ok)
-        self.assertTrue(any("매장 정보" in e for e in errors))
 
     def test_greeting_fails(self):
         """첫 줄 '안녕하세요' 감지."""
@@ -210,6 +160,24 @@ class TestValidateNewsPost(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("제목" in e for e in errors))
 
+    def test_coupon_hook_missing_fails(self):
+        """쿠폰/혜택 훅 문구 누락 감지."""
+        no_hook = _GOOD_OUTPUT.replace("👆 쿠폰부터 받고 글을 읽어주세요! 👆", "글을 읽어주세요")
+        ok, errors = validate_news_post(no_hook)
+        self.assertFalse(ok)
+        self.assertTrue(any("쿠폰" in e or "훅" in e for e in errors))
+
+    def test_coupon_hook_passes_with_keywords(self):
+        """쿠폰 키워드가 있으면 통과."""
+        with_coupon = _GOOD_OUTPUT.replace(
+            "👆 쿠폰부터 받고 글을 읽어주세요! 👆",
+            "쿠폰 받고 글을 읽어주세요!"
+        )
+        ok, errors = validate_news_post(with_coupon)
+        # 쿠폰 관련 에러가 없어야 함
+        coupon_errors = [e for e in errors if "쿠폰" in e or "훅" in e]
+        self.assertEqual(coupon_errors, [])
+
     def test_line_breaks_insufficient(self):
         """줄바꿈 14개 미만 감지."""
         minimal = (
@@ -246,23 +214,11 @@ class TestSplitBlocks(unittest.TestCase):
 class TestExtractBodyText(unittest.TestCase):
     """_extract_body_text 테스트."""
 
-    def test_strips_faq_and_notice(self):
-        block = (
-            "본문 내용\n"
-            "❓ 자주 묻는 질문(FAQ)\n"
-            "Q1. 질문\nA1. 답변\n"
-            "※ 꼭 읽어주세요 (고지/유의사항)\n"
-            "- 항목"
-        )
+    def test_includes_body_content(self):
+        block = "본문 내용\n추가 내용\n더 많은 내용"
         result = _extract_body_text(block)
         self.assertIn("본문 내용", result)
-        self.assertNotIn("Q1", result)
-
-    def test_strips_cta_lines(self):
-        block = "본문 내용\n💬 빠른 문의 (상단 CTA)\n- 채팅 문의\n다른 본문"
-        result = _extract_body_text(block)
-        self.assertIn("본문 내용", result)
-        self.assertIn("다른 본문", result)
+        self.assertIn("추가 내용", result)
 
     def test_strips_title_line(self):
         block = "제목: 테스트 제목\n본문 시작"
@@ -275,7 +231,7 @@ class TestBuildRepairPrompt(unittest.TestCase):
     """build_news_post_repair_prompt 테스트."""
 
     def test_contains_errors(self):
-        errors = ["[의심해소형] 본문 너무 짧음", "[가성비형] FAQ Q3/A3 누락"]
+        errors = ["[의심해소형] 본문 너무 짧음", "[가성비형] 고지 섹션 누락"]
         prompt = build_news_post_repair_prompt(
             errors=errors,
             project={"name": "테스트", "region": "강남"},

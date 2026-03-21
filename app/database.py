@@ -89,6 +89,12 @@ def init_db() -> None:
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now','localtime'))
+            );
         """)
         # Migration for existing DBs: add content_type column if missing
         try:
@@ -209,6 +215,31 @@ def get_latest_report(project_id: int) -> Optional[Dict]:
             (project_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+# ── App Settings ───────────────────────────────────────────────────────────
+
+def get_setting(key: str) -> Optional[str]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key=?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+
+def save_setting(key: str, value: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?, ?, datetime('now','localtime'))
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            (key, value),
+        )
+
+
+def delete_setting(key: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM app_settings WHERE key=?", (key,))
 
 
 # ── Export / Backup ─────────────────────────────────────────────────────────
