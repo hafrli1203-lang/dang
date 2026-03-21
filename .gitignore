@@ -1,5 +1,7 @@
 # API keys / secrets
 .env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -23,6 +25,23 @@ _charts_tmp/
 # Runtime data (managed in AppData)
 *.db
 app.log
+
+# Fonts (download separately)
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# Internal reference docs (keep out of repo)
+*.pdf
+*.xlsx
+
+# Screenshots / temp images
+*.png
+!app_icon.png
+
+# OMC state
+.omc/
 
 # IDE
 .vscode/
