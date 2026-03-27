@@ -41,6 +41,15 @@ def _migrate_legacy_db() -> None:
             _log.info("레거시 DB 백업: %s → %s (DATA_DIR에 이미 존재)", legacy, bak)
 
 
+def _migrate_add_campaign_name() -> None:
+    """projects 테이블에 campaign_name 컬럼이 없으면 추가."""
+    with get_conn() as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        if "campaign_name" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN campaign_name TEXT DEFAULT ''")
+            _log.info("projects 테이블에 campaign_name 컬럼 추가 완료")
+
+
 def init_db() -> None:
     _migrate_legacy_db()
     with get_conn() as conn:
@@ -48,6 +57,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS projects (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 name          TEXT NOT NULL,
+                campaign_name TEXT DEFAULT '',
                 industry      TEXT DEFAULT '',
                 region        TEXT DEFAULT '',
                 goal          TEXT DEFAULT '',
@@ -101,6 +111,7 @@ def init_db() -> None:
             conn.execute("ALTER TABLE generated_content ADD COLUMN content_type TEXT DEFAULT 'planning'")
         except sqlite3.OperationalError:
             pass  # column already exists
+    _migrate_add_campaign_name()
 
 
 # ── Projects ────────────────────────────────────────────────────────────────
@@ -109,9 +120,9 @@ def save_project(data: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO projects
-               (name, industry, region, goal, budget, period, benefits, reference_url)
-               VALUES (:name,:industry,:region,:goal,:budget,:period,:benefits,:reference_url)""",
-            data,
+               (name, campaign_name, industry, region, goal, budget, period, benefits, reference_url)
+               VALUES (:name,:campaign_name,:industry,:region,:goal,:budget,:period,:benefits,:reference_url)""",
+            {**{"campaign_name": ""}, **data},
         )
         return cur.lastrowid
 
@@ -119,10 +130,11 @@ def save_project(data: dict) -> int:
 def update_project(project_id: int, data: dict) -> None:
     with get_conn() as conn:
         conn.execute(
-            """UPDATE projects SET name=:name, industry=:industry, region=:region,
+            """UPDATE projects SET name=:name, campaign_name=:campaign_name,
+               industry=:industry, region=:region,
                goal=:goal, budget=:budget, period=:period, benefits=:benefits,
                reference_url=:reference_url WHERE id=:id""",
-            {**data, "id": project_id},
+            {**{"campaign_name": ""}, **data, "id": project_id},
         )
 
 

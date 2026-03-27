@@ -633,6 +633,56 @@ def build_wizard_ui(
                 with ui.tab_panels(result_tabs, value=tab_all).classes("w-full"):
                     with ui.tab_panel(tab_all):
                         result_md_all = ui.markdown("").classes("w-full dg-prose")
+                        edit_area_all = ui.textarea(value="").classes(
+                            "w-full hidden dg-input"
+                        ).props("rows=20 outlined")
+                        with ui.row().classes("gap-2 mt-2"):
+                            edit_btn_all = ui.button("편집", icon="edit").classes("dg-btn-ghost dg-btn-sm")
+                            save_btn_all = ui.button("편집 완료", icon="check").classes("dg-btn-success dg-btn-sm hidden")
+                            cancel_edit_btn_all = ui.button("취소", icon="close").classes("dg-btn-ghost dg-btn-sm hidden")
+
+                        def _toggle_edit_s2(
+                            _e, _md=result_md_all, _ea=edit_area_all,
+                            _eb=edit_btn_all, _sb=save_btn_all, _cb=cancel_edit_btn_all,
+                        ) -> None:
+                            _ea.value = _s2.get("content", "")
+                            _md.classes("hidden", remove=False)
+                            _ea.classes(remove="hidden")
+                            _eb.classes("hidden", remove=False)
+                            _sb.classes(remove="hidden")
+                            _cb.classes(remove="hidden")
+
+                        def _save_edit_s2(
+                            _e, _md=result_md_all, _ea=edit_area_all,
+                            _eb=edit_btn_all, _sb=save_btn_all, _cb=cancel_edit_btn_all,
+                        ) -> None:
+                            new_text = _ea.value
+                            _s2["content"] = new_text
+                            _wizard_state["step2_content"] = new_text
+                            _md.classes(remove="hidden")
+                            _ea.classes("hidden", remove=False)
+                            _sb.classes("hidden", remove=False)
+                            _cb.classes("hidden", remove=False)
+                            _eb.classes(remove="hidden")
+                            pid = nicegui_app.storage.user.get("current_project_id")
+                            if pid:
+                                save_generated_content(pid, "edited", new_text)
+                            _update_result_display(new_text)
+                            ui.notify("편집 저장 완료", type="positive")
+
+                        def _cancel_edit_s2(
+                            _e, _md=result_md_all, _ea=edit_area_all,
+                            _eb=edit_btn_all, _sb=save_btn_all, _cb=cancel_edit_btn_all,
+                        ) -> None:
+                            _md.classes(remove="hidden")
+                            _ea.classes("hidden", remove=False)
+                            _sb.classes("hidden", remove=False)
+                            _cb.classes("hidden", remove=False)
+                            _eb.classes(remove="hidden")
+
+                        edit_btn_all.on_click(_toggle_edit_s2)
+                        save_btn_all.on_click(_save_edit_s2)
+                        cancel_edit_btn_all.on_click(_cancel_edit_s2)
                     with ui.tab_panel(tab_v1):
                         with ui.row().classes("w-full justify-end mb-1"):
                             ui.button(
@@ -992,6 +1042,7 @@ def build_wizard_ui(
                     sections.get("thumbnail_guide", "") or "*썸네일 가이드를 찾을 수 없습니다.*"
                 )
                 result_card.classes(remove="hidden")
+                feedback_card_s2.classes(remove="hidden")
 
             # ── Generate content ─────────────────────────────────────────────
 
@@ -1098,6 +1149,91 @@ def build_wizard_ui(
                     cancel_btn.classes("hidden")
                     step_label.classes("hidden")
                     gen_btn.props(remove="disabled")
+
+            # ── Feedback & regenerate (Step 2) ────────────────────────────────
+
+            feedback_card_s2 = ui.card().classes("dg-card-flat w-full hidden")
+            with feedback_card_s2:
+                ui.label("수정 요청").style("font-weight: 600; font-size: 14px; color: var(--dg-text-primary)")
+                feedback_s2 = ui.textarea(
+                    placeholder="예: 소식글 톤을 더 캐주얼하게, 쿠폰 혜택을 강조해주세요 등"
+                ).classes("w-full dg-input").props("rows=2 outlined")
+
+                with ui.row().classes("gap-3 items-center"):
+                    regen_s2_btn = ui.button(
+                        "재생성", icon="refresh",
+                        on_click=lambda: _regenerate_content(feedback_s2.value),
+                    ).classes("dg-btn-ghost")
+                    regen_s2_spinner = ui.spinner(size="24px").classes("hidden")
+                    regen_s2_status = ui.label("").classes("dg-progress-text hidden")
+
+                _wizard_state["_regen_s2_spinner"] = regen_s2_spinner
+                _wizard_state["_regen_s2_status"] = regen_s2_status
+                _wizard_state["_regen_s2_btn"] = regen_s2_btn
+
+            async def _regenerate_content(feedback: str = "") -> None:
+                pid = nicegui_app.storage.user.get("current_project_id")
+                if not pid:
+                    return
+                project = get_project(pid)
+                if not project:
+                    return
+
+                engine = engine_radio.value
+                if engine == "both":
+                    engine = "claude"
+
+                regen_spinner = _wizard_state.get("_regen_s2_spinner")
+                regen_status = _wizard_state.get("_regen_s2_status")
+                regen_btn = _wizard_state.get("_regen_s2_btn")
+
+                if regen_btn:
+                    regen_btn.props("disabled loading")
+                if regen_spinner:
+                    regen_spinner.classes(remove="hidden")
+                if regen_status:
+                    regen_status.classes(remove="hidden")
+                    regen_status.set_text("재생성 중...")
+
+                try:
+                    cat = category_sel.value or "default"
+                    strat = strategy_sel.value or "A"
+                    strategy_ctx = _wizard_state.get("step1_content", "")
+                    guide, prompt = build_planning_prompt(
+                        project, extra_input.value, category=cat, strategy=strat,
+                        engine=engine, strategy_context=strategy_ctx,
+                    )
+                    _custom = get_setting("custom_system_prompt")
+                    if _custom:
+                        guide = _custom
+                    if feedback.strip():
+                        prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
+                    if _wizard_state["step2_content"]:
+                        prompt += f"\n\n[이전 결과 (참고하되 수정 요청 반영)]\n{_wizard_state['step2_content']}"
+
+                    loop = asyncio.get_running_loop()
+                    provider = get_provider(engine)
+                    content = await loop.run_in_executor(
+                        None, lambda: provider.generate_text(prompt, system_prompt=guide),
+                    )
+
+                    _s2["content"] = content
+                    _s2["engine"] = engine
+                    _wizard_state["step2_content"] = content
+                    _wizard_state["step2_engine"] = engine
+                    save_generated_content(pid, engine, content)
+
+                    _update_result_display(content)
+                    ui.notify("콘텐츠 재생성 완료!", type="positive")
+
+                except Exception as exc:
+                    _log.exception("콘텐츠 재생성 실패: %s", exc)
+                    ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
+                finally:
+                    if regen_btn:
+                        regen_btn.props(remove="disabled loading")
+                    if regen_spinner:
+                        regen_spinner.classes("hidden")
 
             # ── Export handlers ───────────────────────────────────────────────
 

@@ -249,14 +249,21 @@ def _parse_ai_insights(content: str) -> dict:
     return result
 
 
+_report_log = __import__("logging").getLogger("report")
+
+
 def _make_report_docx_bytes(project: dict, rows: List[Dict], kpi: dict, content: str) -> bytes:
     import tempfile
+    import time as _time
+    _report_log.info("DOCX 생성 시작 (rows=%d)", len(rows))
+    t0 = _time.monotonic()
     with tempfile.TemporaryDirectory() as tmp_dir:
         out = Path(tmp_dir) / "report.docx"
         meta_keys = (
             "name", "period", "goal", "industry", "region", "budget",
             "campaign_name", "author", "target", "operation_method", "benefits",
         )
+        _report_log.info("차트 + DOCX 빌드 시작...")
         build_report_docx(
             project_meta={k: project.get(k, "") for k in meta_keys},
             kpi=_kpi_to_new(kpi),
@@ -265,6 +272,8 @@ def _make_report_docx_bytes(project: dict, rows: List[Dict], kpi: dict, content:
             output_path=out,
             chart_dir=CHARTS_DIR,
         )
+        elapsed = _time.monotonic() - t0
+        _report_log.info("DOCX 생성 완료 (%.1f초)", elapsed)
         return out.read_bytes()
 
 
@@ -321,14 +330,27 @@ def report_page() -> None:
                 ui.icon("business", size="20px").style("color: var(--dg-primary)")
                 ui.label("프로젝트").style("font-weight: 600; color: var(--dg-text-primary)")
                 projects = get_projects()
-                options = {p["id"]: f"{p['name']} ({p.get('region','')})" for p in projects}
+                def _project_label(p: dict) -> str:
+                    name = p.get("name", "")
+                    campaign = p.get("campaign_name", "")
+                    region = p.get("region", "")
+                    parts = [name]
+                    if campaign:
+                        parts.append(campaign)
+                    if region:
+                        parts.append(region)
+                    return " | ".join(parts)
+                options = {p["id"]: _project_label(p) for p in projects}
                 saved_pid = nicegui_app.storage.user.get("current_project_id")
                 project_sel = ui.select(
                     options, label="프로젝트 선택",
                     value=saved_pid if saved_pid in options else None,
                 ).classes("flex-1 dg-select")
                 async def _on_project_change(e) -> None:
-                    nicegui_app.storage.user["current_project_id"] = e.value
+                    new_pid = e.value
+                    nicegui_app.storage.user["current_project_id"] = new_pid
+                    _log = __import__("logging").getLogger("report")
+                    _log.info("프로젝트 전환: pid=%s", new_pid)
                     await _load_saved_data()
 
                 project_sel.on(
@@ -613,43 +635,48 @@ def report_page() -> None:
             avg_cpa = kpi.get("cpa", 0)
 
             with period_container:
-                # 기간별 KPI 그리드
+                # 기간별 KPI 테이블 (컴팩트 뷰)
+                table_columns = [
+                    {"name": "label", "label": "기간", "field": "label", "align": "left", "sortable": True},
+                    {"name": "status", "label": "상태", "field": "status", "align": "center"},
+                    {"name": "cost", "label": "비용", "field": "cost", "align": "right", "sortable": True},
+                    {"name": "impressions", "label": "노출", "field": "impressions", "align": "right", "sortable": True},
+                    {"name": "clicks", "label": "클릭", "field": "clicks", "align": "right", "sortable": True},
+                    {"name": "ctr", "label": "CTR", "field": "ctr", "align": "right", "sortable": True},
+                    {"name": "inquiries", "label": "문의", "field": "inquiries", "align": "right", "sortable": True},
+                    {"name": "cpa", "label": "CPA", "field": "cpa", "align": "right", "sortable": True},
+                ]
+                table_rows = []
                 for pk in period_kpis:
-                    label = pk["label"]
-                    if label in eff:
-                        border_cls = "dg-period-efficient"
-                        tag = "효율"
-                        tag_color = "var(--dg-success)"
-                    elif label in ineff:
-                        border_cls = "dg-period-inefficient"
-                        tag = "비효율"
-                        tag_color = "var(--dg-error)"
+                    plabel = pk["label"]
+                    if plabel in eff:
+                        status = "효율"
+                    elif plabel in ineff:
+                        status = "비효율"
                     else:
-                        border_cls = "dg-period-neutral"
-                        tag = "보통"
-                        tag_color = "var(--dg-text-tertiary)"
+                        status = "보통"
+                    table_rows.append({
+                        "label": plabel,
+                        "status": status,
+                        "cost": f"{pk['cost']:,}원",
+                        "impressions": f"{pk['impressions']:,}",
+                        "clicks": f"{pk['clicks']:,}",
+                        "ctr": f"{pk['ctr']:.2f}%",
+                        "inquiries": f"{pk['inquiries']:,}",
+                        "cpa": f"{pk['cpa']:,.0f}원" if pk["cpa"] > 0 else "-",
+                    })
 
-                    with ui.element("div").classes(f"dg-kpi-card {border_cls}").style("padding: 12px 16px;"):
-                        with ui.row().classes("w-full items-center justify-between"):
-                            ui.label(label).style("font-weight: 600; font-size: 14px")
-                            ui.label(tag).style(
-                                f"font-size: 11px; font-weight: 600; color: white; "
-                                f"background: {tag_color}; padding: 2px 8px; border-radius: 10px"
-                            )
-                        with ui.element("div").style(
-                            "display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 8px;"
-                        ):
-                            for metric_label, metric_val in [
-                                ("비용", f"{pk['cost']:,}원"),
-                                ("노출", f"{pk['impressions']:,}"),
-                                ("클릭", f"{pk['clicks']:,}"),
-                                ("CTR", f"{pk['ctr']:.2f}%"),
-                                ("문의", f"{pk['inquiries']:,}"),
-                                ("CPA", f"{pk['cpa']:,.0f}원" if pk['cpa'] > 0 else "-"),
-                            ]:
-                                with ui.column().classes("gap-0"):
-                                    ui.label(metric_label).style("font-size: 11px; color: var(--dg-text-tertiary)")
-                                    ui.label(metric_val).style("font-size: 13px; font-weight: 600")
+                period_table = ui.table(
+                    columns=table_columns, rows=table_rows, row_key="label",
+                ).classes("w-full dg-table").props("dense flat bordered")
+                period_table.add_slot("body-cell-status", r'''
+                    <q-td :props="props">
+                        <q-badge
+                            :color="props.value === '효율' ? 'green' : props.value === '비효율' ? 'red' : 'grey'"
+                            :label="props.value"
+                        />
+                    </q-td>
+                ''')
 
                 # 예산 재배분 시뮬레이션 배너
                 extra_conv = kpi.get("realloc_extra_conversions", 0)
@@ -791,8 +818,9 @@ def report_page() -> None:
             page_state["kpi"] = kpi
             _show_kpi(kpi)
             await _render_charts(rows)
-            pid = nicegui_app.storage.user.get("current_project_id")
+            pid = project_sel.value
             if pid:
+                nicegui_app.storage.user["current_project_id"] = pid
                 save_performance_rows(pid, rows)
                 ui.notify(f"{len(rows)}개 행 저장됨.", type="positive")
 
@@ -918,6 +946,25 @@ def report_page() -> None:
             pid = nicegui_app.storage.user.get("current_project_id")
             if not pid:
                 return
+
+            # 이전 데이터 초기화
+            page_state["rows"] = []
+            page_state["kpi"] = {}
+            page_state["report_content"] = ""
+            page_state["c_text"] = ""
+            page_state["g_text"] = ""
+            page_state["engine"] = "claude"
+            kpi_container.clear()
+            chart_row.clear()
+            chart_card.classes("hidden")
+            period_container.clear()
+            period_card.classes("hidden")
+            report_md.set_content("")
+            report_card.classes("hidden")
+            upload_preview.clear()
+            upload_preview.classes("hidden")
+
+            # 새 프로젝트 데이터 로드
             rows = get_performance_rows(pid)
             if rows:
                 page_state["rows"] = rows
@@ -933,10 +980,12 @@ def report_page() -> None:
                 report_card.classes(remove="hidden")
 
         async def _generate_report() -> None:
-            pid = nicegui_app.storage.user.get("current_project_id")
+            pid = project_sel.value
             if not pid:
                 ui.notify("프로젝트를 먼저 선택해주세요.", type="warning")
                 return
+            # storage 동기화
+            nicegui_app.storage.user["current_project_id"] = pid
             rows = page_state.get("rows", [])
             if not rows:
                 ui.notify("성과 데이터를 먼저 입력/업로드 해주세요.", type="warning")
@@ -1007,9 +1056,12 @@ def report_page() -> None:
                     download_status.classes(remove="hidden")
                     download_status.set_text("DOCX 파일 준비 중...")
                     if engine == "both":
-                        c_bytes, g_bytes = await asyncio.gather(
-                            loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, c_text),
-                            loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, g_text),
+                        c_bytes, g_bytes = await asyncio.wait_for(
+                            asyncio.gather(
+                                loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, c_text),
+                                loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, g_text),
+                            ),
+                            timeout=90.0,
                         )
                         c_fname = f"성과보고서_{project_name}_Claude.docx"
                         g_fname = f"성과보고서_{project_name}_Gemini.docx"
@@ -1021,8 +1073,11 @@ def report_page() -> None:
                             type="positive", timeout=10000, close_button="확인",
                         )
                     else:
-                        docx_bytes = await loop.run_in_executor(
-                            None, _make_report_docx_bytes, project, rows, kpi, content
+                        docx_bytes = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None, _make_report_docx_bytes, project, rows, kpi, content
+                            ),
+                            timeout=90.0,
                         )
                         fname = f"성과보고서_{project_name}.docx"
                         ExportManager.save_default(docx_bytes, filename=fname)
@@ -1031,6 +1086,12 @@ def report_page() -> None:
                             f"보고서 생성 완료!\n{fname}",
                             type="positive", timeout=8000, close_button="확인",
                         )
+                except asyncio.TimeoutError:
+                    download_status.set_text("DOCX 생성 시간 초과")
+                    ui.notify(
+                        "DOCX 생성이 90초를 초과했습니다. 보고서 텍스트는 저장되었습니다.",
+                        type="warning", timeout=10000, close_button="확인",
+                    )
                 except Exception as docx_err:
                     download_status.set_text("DOCX 생성 오류")
                     ui.notify(f"보고서 생성 완료 (DOCX 오류: {docx_err})", type="warning", timeout=8000)
@@ -1049,7 +1110,7 @@ def report_page() -> None:
                 raise ValueError("먼저 보고서를 생성해주세요.")
             rows = page_state.get("rows", [])
             kpi = page_state.get("kpi", {})
-            pid = nicegui_app.storage.user.get("current_project_id")
+            pid = project_sel.value
             project = get_project(pid) if pid else None
             if not project:
                 raise ValueError("프로젝트를 선택해주세요.")
@@ -1060,20 +1121,29 @@ def report_page() -> None:
         async def _build_report_pairs() -> list[tuple[bytes, str]]:
             project, project_name, rows, kpi, content, engine = _validate_export()
             loop = asyncio.get_running_loop()
-            if engine == "both" and page_state.get("c_text") and page_state.get("g_text"):
-                c_bytes, g_bytes = await asyncio.gather(
-                    loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, page_state["c_text"]),
-                    loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, page_state["g_text"]),
-                )
-                return [
-                    (c_bytes, f"성과보고서_{project_name}_Claude.docx"),
-                    (g_bytes, f"성과보고서_{project_name}_Gemini.docx"),
-                ]
-            else:
-                docx_bytes = await loop.run_in_executor(
-                    None, _make_report_docx_bytes, project, rows, kpi, content
-                )
-                return [(docx_bytes, f"성과보고서_{project_name}.docx")]
+            try:
+                if engine == "both" and page_state.get("c_text") and page_state.get("g_text"):
+                    c_bytes, g_bytes = await asyncio.wait_for(
+                        asyncio.gather(
+                            loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, page_state["c_text"]),
+                            loop.run_in_executor(None, _make_report_docx_bytes, project, rows, kpi, page_state["g_text"]),
+                        ),
+                        timeout=90.0,
+                    )
+                    return [
+                        (c_bytes, f"성과보고서_{project_name}_Claude.docx"),
+                        (g_bytes, f"성과보고서_{project_name}_Gemini.docx"),
+                    ]
+                else:
+                    docx_bytes = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None, _make_report_docx_bytes, project, rows, kpi, content
+                        ),
+                        timeout=90.0,
+                    )
+                    return [(docx_bytes, f"성과보고서_{project_name}.docx")]
+            except asyncio.TimeoutError:
+                raise ValueError("DOCX 생성이 90초를 초과했습니다. 데이터를 줄여서 다시 시도해주세요.")
 
         async def _export_default() -> None:
             export_default_btn.props("disabled loading")

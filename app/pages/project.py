@@ -48,6 +48,7 @@ def project_page() -> None:
 
                 with ui.grid(columns=2).classes("w-full gap-4"):
                     name_in = ui.input("광고주명 *").classes("dg-input").props("outlined dense")
+                    campaign_name_in = ui.input("캠페인명 (예: 6월_신규방문)").classes("dg-input").props("outlined dense")
                     industry_in = ui.input("업종 (예: 카페, 헬스장)").classes("dg-input").props("outlined dense")
                     region_in = ui.input("지역 (예: 서울 마포구 상수동)").classes("dg-input").props("outlined dense")
                     goal_in = ui.input("광고 목표 (예: 신규 방문 유도)").classes("dg-input").props("outlined dense")
@@ -107,8 +108,11 @@ def project_page() -> None:
             for p in projects:
                 pid = p["id"]
                 is_active = state["current_id"] == pid
+                btn_label = p["name"]
+                if p.get("campaign_name"):
+                    btn_label += f" | {p['campaign_name']}"
                 ui.button(
-                    p["name"],
+                    btn_label,
                     icon="storefront",
                     on_click=lambda _pid=pid: load_form(_pid),
                 ).classes(
@@ -119,7 +123,7 @@ def project_page() -> None:
         state["current_id"] = pid
         if pid is None:
             form_title.set_text("새 프로젝트 만들기")
-            for inp in (name_in, industry_in, region_in, goal_in, budget_in, period_in, reference_in):
+            for inp in (name_in, campaign_name_in, industry_in, region_in, goal_in, budget_in, period_in, reference_in):
                 inp.value = ""
             benefits_in.value = ""
         else:
@@ -128,6 +132,7 @@ def project_page() -> None:
                 return
             form_title.set_text(f"프로젝트 수정: {p['name']}")
             name_in.value = p.get("name", "")
+            campaign_name_in.value = p.get("campaign_name", "")
             industry_in.value = p.get("industry", "")
             region_in.value = p.get("region", "")
             goal_in.value = p.get("goal", "")
@@ -141,6 +146,7 @@ def project_page() -> None:
     def _collect() -> dict:
         return {
             "name": name_in.value.strip(),
+            "campaign_name": campaign_name_in.value.strip(),
             "industry": industry_in.value.strip(),
             "region": region_in.value.strip(),
             "goal": goal_in.value.strip(),

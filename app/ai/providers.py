@@ -29,7 +29,7 @@ _log = get_logger("providers")
 _T = TypeVar("_T")
 
 # Transient error keywords for classification
-_TRANSIENT_KEYWORDS = ("429", "rate", "limit", "timeout", "timed out", "503", "500",
+_TRANSIENT_KEYWORDS = ("429", "529", "rate", "limit", "timeout", "timed out", "503", "500",
                        "overloaded", "resource_exhausted", "unavailable", "connection")
 
 
@@ -50,6 +50,12 @@ def _parse_retry_after(exc: Exception) -> float | None:
     if match:
         return min(float(match.group(1)), 30.0)
     return None
+
+
+def _is_overloaded(exc: Exception) -> bool:
+    """Check if an exception is a 529 overloaded error (needs longer waits)."""
+    msg = str(exc).lower()
+    return "529" in msg or "overloaded" in msg
 
 
 def retry_api_call(
@@ -79,13 +85,23 @@ def retry_api_call(
             return fn()
         except Exception as exc:
             last_exc = exc
-            if attempt >= max_retries or not _is_transient(exc):
+            if not _is_transient(exc):
+                raise
+            # 529 overloaded: use longer delays and allow extra retries
+            overloaded = _is_overloaded(exc)
+            effective_max = max_retries + 2 if overloaded else max_retries
+            if attempt >= effective_max:
                 raise
             retry_after = _parse_retry_after(exc)
-            delay = retry_after if retry_after else base_delay * (2 ** attempt)
+            if retry_after:
+                delay = retry_after
+            elif overloaded:
+                delay = max(5.0, base_delay * (2 ** attempt))  # min 5s for 529
+            else:
+                delay = base_delay * (2 ** attempt)
             _log.warning(
                 "%s 일시적 오류 (시도 %d/%d), %.1f초 후 재시도: %s",
-                label, attempt + 1, max_retries + 1, delay, exc,
+                label, attempt + 1, effective_max + 1, delay, exc,
             )
             time.sleep(delay)
     raise last_exc  # type: ignore[misc]  # unreachable but satisfies type checker
@@ -156,6 +172,11 @@ class ClaudeProvider(BaseProvider):
             _log.info("Claude API 호출 완료")
         except Exception as exc:
             _log.error("Claude API 호출 실패: %s", exc)
+            if _is_overloaded(exc):
+                raise ValueError(
+                    "Claude API 서버가 과부하 상태입니다. 잠시 후 다시 시도해주세요. "
+                    "(5회 재시도 후에도 실패)"
+                ) from exc
             raise ValueError(f"Claude API 호출 실패: {exc}") from exc
         return "".join(block.text for block in response.content if hasattr(block, "text"))
 
@@ -177,6 +198,10 @@ class ClaudeProvider(BaseProvider):
             _log.info("Claude 스트리밍 완료")
         except Exception as exc:
             _log.error("Claude 스트리밍 실패: %s", exc)
+            if _is_overloaded(exc):
+                raise ValueError(
+                    "Claude API 서버가 과부하 상태입니다. 잠시 후 다시 시도해주세요."
+                ) from exc
             raise ValueError(f"Claude 스트리밍 실패: {exc}") from exc
 
 
@@ -227,6 +252,10 @@ class GeminiProvider(BaseProvider):
             _log.info("Gemini API 호출 완료")
         except Exception as exc:
             _log.error("Gemini API 호출 실패: %s", exc)
+            if _is_overloaded(exc):
+                raise ValueError(
+                    "Gemini API 서버가 과부하 상태입니다. 잠시 후 다시 시도해주세요."
+                ) from exc
             raise ValueError(f"Gemini API 호출 실패: {exc}") from exc
         text = response.text
         if not text:

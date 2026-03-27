@@ -151,7 +151,17 @@ def planning_page() -> None:
                 ui.icon("business", size="20px").style("color: var(--dg-primary)")
                 ui.label("프로젝트").style("font-weight: 600; color: var(--dg-text-primary)")
                 projects = get_projects()
-                options = {p["id"]: f"{p['name']} ({p.get('region','')})" for p in projects}
+                def _project_label(p: dict) -> str:
+                    name = p.get("name", "")
+                    campaign = p.get("campaign_name", "")
+                    region = p.get("region", "")
+                    parts = [name]
+                    if campaign:
+                        parts.append(campaign)
+                    if region:
+                        parts.append(region)
+                    return " | ".join(parts)
+                options = {p["id"]: _project_label(p) for p in projects}
                 saved_pid = nicegui_app.storage.user.get("current_project_id")
                 project_sel = ui.select(
                     options, label="프로젝트 선택",
