@@ -34,6 +34,7 @@ NAV_PAGES = [
     ("folder_open", "프로젝트 관리", "/"),
     ("edit_note", "광고 기획", "/planning"),
     ("assessment", "성과 보고서", "/report"),
+    ("insights", "고급 분석", "/analysis"),
 ]
 
 

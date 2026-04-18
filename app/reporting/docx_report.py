@@ -1559,6 +1559,133 @@ def make_charts(
     return charts
 
 
+def _build_demographic_section(
+    doc: Document,
+    demographic_data: dict,
+) -> None:
+    """고급 분석 섹션 — 연령/성별 찢기 + 캠페인 판정 + 재배분 시뮬.
+
+    demographic_data shape:
+      {"genders": [Segment], "ages": [Segment], "campaigns": [CampaignPerf]}
+    """
+    from app.reporting.demographic import (
+        analyze_segments,
+        build_priority_checklist,
+        check_auto_manual_pairing,
+        check_variable_control,
+        group_ages_by_cpa,
+        judge_campaigns,
+        simulate_reallocation,
+    )
+
+    genders = demographic_data.get("genders") or []
+    ages = demographic_data.get("ages") or []
+    campaigns = demographic_data.get("campaigns") or []
+
+    if not (genders or ages or campaigns):
+        return
+
+    doc.add_heading("고급 분석 — 연령/성별 최적화", level=1)
+
+    def _seg_table(title: str, segs: list) -> None:
+        if not segs:
+            return
+        doc.add_heading(title, level=2)
+        table = doc.add_table(rows=1, cols=6)
+        table.style = "Light Grid Accent 2"
+        hdr = table.rows[0].cells
+        for i, h in enumerate(["구분", "비용", "비중(%)", "총행동", "행동당비용", "CTR(%)"]):
+            hdr[i].text = h
+        total = sum(s.cost for s in segs) or 1
+        for s in segs:
+            row = table.add_row().cells
+            row[0].text = s.label
+            row[1].text = f"{s.cost:,}원"
+            row[2].text = f"{s.cost / total * 100:.1f}"
+            row[3].text = f"{s.actions:,}"
+            row[4].text = f"{int(s.cpa):,}원" if s.actions else "-"
+            row[5].text = f"{s.ctr:.2f}"
+
+    def _insights_list(title: str, segs: list) -> None:
+        ins = analyze_segments(segs)
+        if not ins:
+            return
+        doc.add_heading(title, level=3)
+        for i in ins:
+            doc.add_paragraph(i.message, style="List Bullet")
+
+    _seg_table("성별 성과", genders)
+    _insights_list("성별 인사이트", genders)
+    _seg_table("연령대 성과", ages)
+    _insights_list("연령 인사이트", ages)
+
+    if ages:
+        doc.add_heading("연령 그룹핑 추천 (행동당비용 유사도 기준)", level=2)
+        doc.add_paragraph(
+            "각 묶음은 별도 캠페인으로 찢어서 운영하세요. 수동+자동 같은 조건 쌍으로 동시 운영 필수.",
+            style="Intense Quote" if "Intense Quote" in [s.name for s in doc.styles] else None,
+        )
+        groups = group_ages_by_cpa(ages, n_groups=3)
+        for i, g in enumerate(groups):
+            cpa_str = "OFF 권장" if g.avg_cpa == float("inf") else f"{int(g.avg_cpa):,}원"
+            doc.add_paragraph(
+                f"묶음 {i + 1}: {' / '.join(g.members)} — 평균 CPA {cpa_str} "
+                f"(비용 {g.total_cost:,}원, 행동 {g.total_actions:,}건)",
+                style="List Bullet",
+            )
+
+    if campaigns:
+        judgments = judge_campaigns(campaigns)
+        doc.add_heading("캠페인별 판정", level=2)
+        table = doc.add_table(rows=1, cols=6)
+        table.style = "Light Grid Accent 2"
+        hdr = table.rows[0].cells
+        for i, h in enumerate(["캠페인", "비용", "비중(%)", "행동당비용", "CTR(%)", "판정"]):
+            hdr[i].text = h
+        for j in judgments:
+            row = table.add_row().cells
+            row[0].text = j.campaign.name
+            row[1].text = f"{j.campaign.cost:,}원"
+            row[2].text = f"{j.cost_share:.1f}"
+            row[3].text = f"{int(j.campaign.cpa):,}원" if j.campaign.actions else "-"
+            row[4].text = f"{j.campaign.ctr:.2f}"
+            row[5].text = j.verdict
+
+        plan = simulate_reallocation(judgments)
+        doc.add_heading("예산 재배분 시뮬레이션", level=2)
+        doc.add_paragraph(
+            f"현재 총예산 {plan.current_total:,}원 → 조정 후 {plan.projected_total:,}원 "
+            f"(절감 {plan.savings:,}원, 예상 행동 +{plan.expected_action_delta}건)"
+        )
+        if plan.cuts:
+            doc.add_paragraph("축소/OFF 대상", style="Heading 3")
+            for name, amt in plan.cuts:
+                doc.add_paragraph(f"{name}: {amt:,}원 절감", style="List Bullet")
+        if plan.boosts:
+            doc.add_paragraph("증액 대상", style="Heading 3")
+            for name, amt in plan.boosts:
+                doc.add_paragraph(f"{name}: +{amt:,}원", style="List Bullet")
+
+        doc.add_heading("실행 우선순위", level=2)
+        for item in build_priority_checklist(judgments):
+            doc.add_paragraph(item, style="List Number")
+
+        var_warnings = check_variable_control(campaigns)
+        pair_gaps = check_auto_manual_pairing(campaigns)
+        if var_warnings or pair_gaps:
+            doc.add_heading("운영 경고", level=2)
+            for w in var_warnings:
+                doc.add_paragraph(
+                    f"[변수 통제 위반] {w.campaign_a} ↔ {w.campaign_b}: {', '.join(w.diffs)}",
+                    style="List Bullet",
+                )
+            for g in pair_gaps:
+                doc.add_paragraph(
+                    f"[수동/자동 매칭 누락] {g.campaign}: {g.missing_counterpart} 캠페인 쌍 없음",
+                    style="List Bullet",
+                )
+
+
 def build_report_docx(
     project_meta: ProjectMeta,
     kpi: KPI,
@@ -1567,6 +1694,7 @@ def build_report_docx(
     output_path: Path,
     chart_dir: Optional[Path] = None,
     tracking_mode: str = "db_funnel",
+    demographic_data: Optional[dict] = None,
 ) -> Path:
     """성과보고서 DOCX 생성 → output_path 반환.
 
@@ -1637,6 +1765,10 @@ def build_report_docx(
     # Sec 6: 인사이트
     doc.add_heading("인사이트", level=1)
     _build_insights_section(doc, norm)
+
+    # Sec 6.5: 고급 분석 (선택적 — demographic_data 제공 시만)
+    if demographic_data:
+        _build_demographic_section(doc, demographic_data)
 
     # Sec 7: 다음 실험·개선안
     doc.add_heading("다음 실험 \u00b7 개선안", level=1)
