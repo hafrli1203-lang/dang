@@ -5,6 +5,9 @@
 - 생성/편집 폼은 다이얼로그로 — 평소 화면을 차지하지 않는다
 - 상단 한 줄: 제목/개수 + 검색 + 데이터 관리 + 새 프로젝트
 """
+import re
+from collections import OrderedDict, defaultdict
+
 from nicegui import ui, app as nicegui_app
 
 from app.common import create_nav, safe_download
@@ -28,6 +31,76 @@ from app.onboarding import (
     onboarding_progress,
 )
 
+_MONTH_RE = re.compile(r"(\d{1,2})\s*월")
+# 날짜 형식(2026.05.01 / 2026-05 / 2026/5)에서 월 추출 — period가 'N월'이 아닐 때 폴백.
+_DATE_MONTH_RE = re.compile(r"\d{4}[.\-/](\d{1,2})")
+
+
+def _month_key(p: dict) -> tuple:
+    """캠페인의 월 그룹 키 (정렬용 정수, 표시 라벨).
+
+    1) campaign_name→period에서 'N월' 파싱
+    2) 없으면 날짜 형식(YYYY.MM.DD)에서 월 추출
+    """
+    sources = (p.get("campaign_name") or "", p.get("period") or "")
+    for rx in (_MONTH_RE, _DATE_MONTH_RE):
+        for src in sources:
+            m = rx.search(src)
+            if m:
+                mo = int(m.group(1))
+                if 1 <= mo <= 12:
+                    return (mo, f"{mo}월")
+    return (99, "기타")
+
+
+def _campaign_label(p: dict, month_label: str) -> str:
+    """소재 행 표시명. 월 라벨이 따로 있으면 앞의 'N월'을 떼서 중복 제거."""
+    cn = (p.get("campaign_name") or "").strip()
+    if not cn:
+        return "캠페인명 미입력"
+    if month_label != "기타":
+        stripped = _MONTH_RE.sub("", cn, count=1).lstrip(" _-·~|").strip()
+        return stripped or cn
+    return cn
+
+
+def _fmt_budget(raw: str) -> str:
+    """예산 문자열을 짧은 칩용으로 축약 (첫 숫자 기준, 1만 이상이면 '만')."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"\d[\d,]*", raw)
+    if not m:
+        return raw[:10]
+    n = int(m.group(0).replace(",", ""))
+    if n >= 10000:
+        man = n / 10000
+        return f"{int(man)}만" if man == int(man) else f"{man:.1f}만"
+    return f"{n:,}"
+
+
+def _targeting_summary(p: dict) -> str:
+    """소재 행에 보일 당근 타겟 요약 (기록된 값만). 예: '5km · 여성 · 35~59 · 자동 입찰'."""
+    bits = []
+    radius = (p.get("target_radius_km") or "").strip()
+    if radius:
+        bits.append(radius if radius.endswith("km") else f"{radius}km")
+    if p.get("target_gender"):
+        bits.append(p["target_gender"])
+    ages = [a for a in (p.get("target_age") or "").split(",") if a]
+    if ages:
+        bits.append(ages[0] if len(ages) == 1 else f"{ages[0]}~{ages[-1]}")
+    if p.get("bid_type"):
+        bits.append(p["bid_type"])
+    if p.get("coupon_info"):
+        bits.append("쿠폰")
+    return " · ".join(bits)
+
+
+# 당근 연령대 밴드 (광고그룹 타겟과 동일 순서)
+_AGE_BANDS = ["15~19", "20~24", "25~29", "30~34", "35~39",
+              "40~44", "45~49", "50~54", "55~59", "60이상"]
+
 
 @ui.page("/")
 def project_page() -> None:
@@ -35,6 +108,18 @@ def project_page() -> None:
 
     # -- page-level state --
     state: dict = {"current_id": None, "query": ""}
+
+    # 연령대 칩 토글 상태 (당근식 다중 선택)
+    selected_ages: set = set()
+    age_chip_els: dict = {}
+
+    def _refresh_age_chips() -> None:
+        for band, el in age_chip_els.items():
+            el.classes(replace="dg-age-chip" + (" active" if band in selected_ages else ""))
+
+    def _toggle_age(band: str) -> None:
+        selected_ages.discard(band) if band in selected_ages else selected_ages.add(band)
+        _refresh_age_chips()
 
     # ══════════════════ 생성/편집 다이얼로그 ══════════════════
     with ui.dialog() as form_dlg, ui.card().classes("dg-card").style(
@@ -53,6 +138,52 @@ def project_page() -> None:
         benefits_in = ui.textarea(
             "주요 혜택/특징 (3~5가지, 줄바꿈 구분)"
         ).classes("w-full mt-2 dg-input").props("outlined dense rows=4")
+
+        # ══ 당근 광고 세팅 (기록용) — 당근 '광고그룹 수정' 화면 구조 ══
+        ui.label("당근 광고 세팅 (기록용)").classes("dg-section-title").style(
+            "margin-top: 18px; font-size: 14px"
+        )
+        ui.label(
+            "당근에서 실제로 설정한 값을 기록해두면 다음 달에 다시 입력하지 않아도 돼요."
+        ).classes("dg-text-sm").style("margin-top: 2px")
+
+        # ── 오디언스 타겟 ──
+        ui.label("오디언스 타겟").classes("dg-subsection")
+        target_radius_km_in = ui.input("지역 반경 (km, 예: 5)").classes(
+            "w-full dg-input"
+        ).props("outlined dense")
+        ui.label("성별").classes("dg-text-sm").style("margin-top: 8px")
+        target_gender_in = ui.radio(
+            ["모든 성별", "여성", "남성"]
+        ).props("inline").classes("dg-radio-inline")
+        ui.label("연령").classes("dg-text-sm").style("margin-top: 8px")
+        with ui.row().classes("gap-2 flex-wrap"):
+            for band in _AGE_BANDS:
+                chip = ui.element("div").classes("dg-age-chip")
+                with chip:
+                    ui.label(band)
+                chip.on("click", lambda _, b=band: _toggle_age(b))
+                age_chip_els[band] = chip
+
+        # ── 예산 및 입찰 ──
+        ui.label("예산 및 입찰").classes("dg-subsection")
+        with ui.grid(columns=2).classes("w-full gap-3"):
+            daily_budget_in = ui.input("일일 예산 (예: 10,000원)").classes(
+                "dg-input"
+            ).props("outlined dense")
+        ui.label("입찰 방식").classes("dg-text-sm").style("margin-top: 8px")
+        bid_type_in = ui.radio(
+            ["자동 입찰", "수동 입찰"]
+        ).props("inline").classes("dg-radio-inline")
+
+        # ── 소재 & 쿠폰 ──
+        ui.label("소재 & 쿠폰").classes("dg-subsection")
+        ad_titles_in = ui.textarea(
+            "소재(광고) 제목들 — 줄바꿈으로 여러 개"
+        ).classes("w-full dg-input").props("outlined dense rows=3")
+        coupon_info_in = ui.input(
+            "쿠폰 (예: 변색렌즈 0원 / 6월 30일까지)"
+        ).classes("w-full mt-2 dg-input").props("outlined dense")
 
         with ui.row().classes("mt-4 gap-2 w-full items-center"):
             delete_btn = ui.button(
@@ -138,52 +269,76 @@ def project_page() -> None:
                     ui.label(f"'{state['query']}' 검색 결과가 없어요.").classes("dg-empty-text")
                 return
 
+            # 매장(name)별로 묶고, 매장 안에서 월별 소재로 정리
+            stores = OrderedDict()
             for p in filtered:
-                pid = p["id"]
-                is_active = selected == pid
-                card = ui.element("div").classes(
-                    "dg-project-card" + (" active" if is_active else "")
+                stores.setdefault(p.get("name", ""), []).append(p)
+
+            for store_name, items in stores.items():
+                store_active = any(it["id"] == selected for it in items)
+                industry = next((x.get("industry") for x in items if x.get("industry")), "")
+                region = next((x.get("region") for x in items if x.get("region")), "")
+                meta_bits = [b for b in (industry, region, f"소재 {len(items)}") if b]
+
+                store_card = ui.element("div").classes(
+                    "dg-store-card" + (" active" if store_active else "")
                 )
-                with card:
-                    # 상단: 아바타 + 이름/캠페인 + 편집
+                with store_card:
+                    # 매장 헤더: 아바타 + 매장명 + 메타 + 소재 추가
                     with ui.row().classes("items-center gap-3 w-full no-wrap"):
                         with ui.element("div").classes("dg-avatar"):
-                            ui.label(_initial(p.get("name", "")))
+                            ui.label(_initial(store_name))
                         with ui.column().classes("gap-0").style("flex: 1; min-width: 0"):
-                            ui.label(p.get("name", "")).classes("dg-project-card-title w-full")
-                            ui.label(
-                                p.get("campaign_name") or "캠페인명 미입력"
-                            ).classes("dg-project-card-sub w-full")
+                            ui.label(store_name or "(이름 없음)").classes("dg-store-name w-full")
+                            ui.label(" · ".join(meta_bits)).classes("dg-store-meta w-full")
                         ui.button(
-                            icon="edit",
-                            color=None,
-                            on_click=lambda _, _pid=pid: _open_edit(_pid),
-                        ).props("flat round dense").style("color: var(--dg-text-caption)")
+                            icon="add", color=None,
+                            on_click=lambda _, n=store_name: _open_create_for(n),
+                        ).props("flat round dense").style(
+                            "color: var(--dg-text-caption)"
+                        ).tooltip("이 매장에 소재 추가")
 
-                    # 메타 칩: 업종 / 지역
-                    with ui.row().classes("gap-2 flex-wrap"):
-                        if p.get("industry"):
-                            ui.label(p["industry"]).classes("dg-meta-chip")
-                        if p.get("region"):
-                            ui.label(p["region"]).classes("dg-meta-chip")
-                        if p.get("budget"):
-                            ui.label(f"예산 {p['budget']}").classes("dg-meta-chip")
-
-                    # 하단: 바로가기
-                    with ui.row().classes("gap-1 w-full items-center"):
-                        ui.button(
-                            "기획 시작", icon="edit_note", color=None,
-                            on_click=lambda _, _pid=pid: _go(_pid, "/planning"),
-                        ).props("flat dense no-caps").classes("dg-quick-link")
-                        ui.button(
-                            "성과 보고서", icon="assessment", color=None,
-                            on_click=lambda _, _pid=pid: _go(_pid, "/report"),
-                        ).props("flat dense no-caps").classes("dg-quick-link")
-                        ui.space()
-                        if is_active:
-                            ui.label("선택됨").classes("dg-badge dg-badge-success")
-                # 카드 클릭 = 현재 프로젝트로 선택
-                card.on("click", lambda _, _pid=pid: _select(_pid))
+                    # 월별 소재 그룹
+                    by_month = defaultdict(list)
+                    for it in items:
+                        by_month[_month_key(it)].append(it)
+                    for key in sorted(by_month.keys()):
+                        _mo, label = key
+                        with ui.element("div").classes("dg-month-group"):
+                            ui.label(label).classes("dg-month-label")
+                            for it in by_month[key]:
+                                pid = it["id"]
+                                is_active = selected == pid
+                                row = ui.element("div").classes(
+                                    "dg-campaign-row" + (" active" if is_active else "")
+                                )
+                                with row:
+                                    with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                                        ui.label(_campaign_label(it, label)).classes("dg-campaign-name")
+                                        if it.get("budget"):
+                                            ui.label(_fmt_budget(it["budget"])).classes("dg-campaign-budget")
+                                        with ui.row().classes("dg-campaign-actions no-wrap gap-0"):
+                                            ui.button(
+                                                icon="edit_note", color=None,
+                                            ).props("flat round dense").classes("dg-quick-link").on(
+                                                "click.stop", lambda _, _pid=pid: _go(_pid, "/planning")
+                                            ).tooltip("기획")
+                                            ui.button(
+                                                icon="assessment", color=None,
+                                            ).props("flat round dense").classes("dg-quick-link").on(
+                                                "click.stop", lambda _, _pid=pid: _go(_pid, "/report")
+                                            ).tooltip("성과")
+                                            ui.button(
+                                                icon="edit", color=None,
+                                            ).props("flat round dense").style(
+                                                "color: var(--dg-text-caption)"
+                                            ).on(
+                                                "click.stop", lambda _, _pid=pid: _open_edit(_pid)
+                                            ).tooltip("수정")
+                                    summary = _targeting_summary(it)
+                                    if summary:
+                                        ui.label(summary).classes("dg-campaign-target")
+                                row.on("click", lambda _, _pid=pid: _select(_pid))
 
     def _dismiss_onboarding() -> None:
         save_setting("onboarding_dismissed", "1")
@@ -277,6 +432,16 @@ def project_page() -> None:
         period_in.value = values.get("period", "") or ""
         benefits_in.value = values.get("benefits", "") or ""
         reference_in.value = values.get("reference_url", "") or ""
+        # 광고 기록 (당근 세팅)
+        target_radius_km_in.value = values.get("target_radius_km", "") or ""
+        daily_budget_in.value = values.get("daily_budget", "") or ""
+        target_gender_in.value = values.get("target_gender", "") or None
+        bid_type_in.value = values.get("bid_type", "") or None
+        selected_ages.clear()
+        selected_ages.update(a for a in (values.get("target_age", "") or "").split(",") if a)
+        _refresh_age_chips()
+        ad_titles_in.value = values.get("ad_titles", "") or ""
+        coupon_info_in.value = values.get("coupon_info", "") or ""
 
     def _open_create() -> None:
         state["current_id"] = None
@@ -284,6 +449,11 @@ def project_page() -> None:
         _fill_form(None)
         delete_btn.set_visibility(False)
         form_dlg.open()
+
+    def _open_create_for(store_name: str) -> None:
+        """매장 카드의 '+'에서 — 새 소재 생성 폼을 열고 매장명을 미리 채운다."""
+        _open_create()
+        name_in.value = store_name
 
     def _open_edit(pid: int) -> None:
         p = get_project(pid)
@@ -297,6 +467,7 @@ def project_page() -> None:
         form_dlg.open()
 
     def _collect() -> dict:
+        ordered_ages = [b for b in _AGE_BANDS if b in selected_ages]
         return {
             "name": name_in.value.strip(),
             "campaign_name": campaign_name_in.value.strip(),
@@ -307,6 +478,14 @@ def project_page() -> None:
             "period": period_in.value.strip(),
             "benefits": benefits_in.value.strip(),
             "reference_url": reference_in.value.strip(),
+            # 광고 기록 (당근 세팅)
+            "target_radius_km": (target_radius_km_in.value or "").strip(),
+            "target_gender": target_gender_in.value or "",
+            "target_age": ",".join(ordered_ages),
+            "bid_type": bid_type_in.value or "",
+            "daily_budget": (daily_budget_in.value or "").strip(),
+            "ad_titles": (ad_titles_in.value or "").strip(),
+            "coupon_info": (coupon_info_in.value or "").strip(),
         }
 
     def _save() -> None:

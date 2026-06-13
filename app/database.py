@@ -50,6 +50,35 @@ def _migrate_add_campaign_name() -> None:
             _log.info("projects 테이블에 campaign_name 컬럼 추가 완료")
 
 
+# 당근 실제 광고 세팅을 기록하는 컬럼들 (P1 광고 기록 모델). 전부 TEXT, 기본 ''.
+_AD_RECORD_COLUMNS = [
+    "target_radius_km",  # 지역 반경 km (예: "5")
+    "target_gender",     # 모든/여성/남성
+    "target_age",        # 연령대 다중 (쉼표 결합, 예: "20~24,25~29")
+    "bid_type",          # 자동/수동
+    "daily_budget",      # 일일 예산
+    "ad_titles",         # 소재(광고) 제목들 — 줄바꿈 구분
+    "coupon_info",       # 쿠폰 (이름/혜택/기간 자유 입력)
+]
+
+# save/update 시 호출자가 일부 필드를 안 넘겨도 안전하도록 기본값 (name만 필수).
+_PROJECT_DEFAULTS = {
+    "campaign_name": "", "industry": "", "region": "", "goal": "",
+    "budget": "", "period": "", "benefits": "", "reference_url": "",
+    **{c: "" for c in _AD_RECORD_COLUMNS},
+}
+
+
+def _migrate_add_ad_record_fields() -> None:
+    """projects 테이블에 광고 기록 컬럼이 없으면 추가 (기존 DB 마이그레이션)."""
+    with get_conn() as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        for c in _AD_RECORD_COLUMNS:
+            if c not in cols:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {c} TEXT DEFAULT ''")
+                _log.info("projects 테이블에 %s 컬럼 추가 완료", c)
+
+
 def init_db() -> None:
     _migrate_legacy_db()
     with get_conn() as conn:
@@ -65,6 +94,13 @@ def init_db() -> None:
                 period        TEXT DEFAULT '',
                 benefits      TEXT DEFAULT '',
                 reference_url TEXT DEFAULT '',
+                target_radius_km TEXT DEFAULT '',
+                target_gender    TEXT DEFAULT '',
+                target_age       TEXT DEFAULT '',
+                bid_type         TEXT DEFAULT '',
+                daily_budget     TEXT DEFAULT '',
+                ad_titles        TEXT DEFAULT '',
+                coupon_info      TEXT DEFAULT '',
                 created_at    TEXT DEFAULT (datetime('now','localtime'))
             );
 
@@ -112,6 +148,7 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass  # column already exists
     _migrate_add_campaign_name()
+    _migrate_add_ad_record_fields()
 
 
 # ── Projects ────────────────────────────────────────────────────────────────
@@ -120,9 +157,11 @@ def save_project(data: dict) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO projects
-               (name, campaign_name, industry, region, goal, budget, period, benefits, reference_url)
-               VALUES (:name,:campaign_name,:industry,:region,:goal,:budget,:period,:benefits,:reference_url)""",
-            {**{"campaign_name": ""}, **data},
+               (name, campaign_name, industry, region, goal, budget, period, benefits, reference_url,
+                target_radius_km, target_gender, target_age, bid_type, daily_budget, ad_titles, coupon_info)
+               VALUES (:name,:campaign_name,:industry,:region,:goal,:budget,:period,:benefits,:reference_url,
+                :target_radius_km,:target_gender,:target_age,:bid_type,:daily_budget,:ad_titles,:coupon_info)""",
+            {**_PROJECT_DEFAULTS, **data},
         )
         return cur.lastrowid
 
@@ -133,8 +172,11 @@ def update_project(project_id: int, data: dict) -> None:
             """UPDATE projects SET name=:name, campaign_name=:campaign_name,
                industry=:industry, region=:region,
                goal=:goal, budget=:budget, period=:period, benefits=:benefits,
-               reference_url=:reference_url WHERE id=:id""",
-            {**{"campaign_name": ""}, **data, "id": project_id},
+               reference_url=:reference_url,
+               target_radius_km=:target_radius_km, target_gender=:target_gender,
+               target_age=:target_age, bid_type=:bid_type, daily_budget=:daily_budget,
+               ad_titles=:ad_titles, coupon_info=:coupon_info WHERE id=:id""",
+            {**_PROJECT_DEFAULTS, **data, "id": project_id},
         )
 
 

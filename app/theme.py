@@ -537,6 +537,82 @@ body, .q-page {
     white-space: nowrap;
 }
 
+/* == Store-grouped projects (매장별 묶음 + 월별 소재) == */
+.dg-store-card {
+    background: var(--dg-card);
+    border: 1px solid var(--dg-border);
+    border-radius: var(--dg-radius);
+    padding: 16px 16px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+    min-width: 0;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dg-store-card:hover { box-shadow: var(--dg-shadow-lg); border-color: #D5DAE1; }
+.dg-store-card.active { border-color: var(--dg-primary); }
+.dg-store-name {
+    font-size: 15px; font-weight: 700; letter-spacing: -0.3px;
+    color: var(--dg-text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dg-store-meta {
+    font-size: 11.5px; color: var(--dg-text-tertiary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dg-month-group { display: flex; flex-direction: column; gap: 2px; }
+.dg-month-label {
+    font-size: 11px; font-weight: 700; color: var(--dg-text-caption);
+    letter-spacing: 0.2px; margin: 6px 0 0 2px;
+}
+.dg-campaign-row {
+    display: flex; flex-direction: column; gap: 1px;
+    padding: 6px 8px; border-radius: 10px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+}
+.dg-campaign-row:hover { background: var(--dg-surface); }
+.dg-campaign-row.active {
+    background: var(--dg-primary-light);
+    border-color: var(--dg-primary);
+}
+.dg-campaign-name {
+    flex: 1; min-width: 0;
+    font-size: 13px; font-weight: 600; color: var(--dg-text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dg-campaign-budget {
+    font-size: 11px; color: var(--dg-text-tertiary);
+    white-space: nowrap; flex-shrink: 0;
+}
+.dg-campaign-actions { flex-shrink: 0; }
+.dg-campaign-target {
+    font-size: 10.5px; color: var(--dg-text-tertiary);
+    margin-left: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* == 당근식 광고 세팅 입력 (연령 칩 토글 + 서브섹션) == */
+.dg-subsection {
+    font-size: 12px; font-weight: 700; letter-spacing: -0.2px;
+    color: var(--dg-text-secondary);
+    margin: 14px 0 6px;
+}
+.dg-age-chip {
+    font-size: 12px; font-weight: 600;
+    padding: 7px 14px; border-radius: 999px;
+    background: var(--dg-surface);
+    color: var(--dg-text-secondary);
+    border: 1px solid var(--dg-border);
+    cursor: pointer; user-select: none;
+    transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dg-age-chip:hover { border-color: var(--dg-primary); }
+.dg-age-chip.active {
+    background: var(--dg-text-primary);
+    color: #fff;
+    border-color: var(--dg-text-primary);
+}
+
 /* == Project List == */
 .dg-project-item {
     display: flex !important; align-items: center !important; gap: 10px !important;
