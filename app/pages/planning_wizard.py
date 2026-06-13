@@ -464,8 +464,10 @@ def build_wizard_ui(
         engine = engine_radio.value
 
         # Validate API key
-        if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
+        # Claude는 기본이 CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine == "claude" and os.getenv("CLAUDE_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("ANTHROPIC_API_KEY", "")):
+            ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
         if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
             ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
@@ -1075,8 +1077,10 @@ def build_wizard_ui(
                 cancel_btn.classes(remove="hidden")
 
                 # Validate API keys
-                if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-                    ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
+                # Claude는 기본이 CLI(구독). API 백엔드일 때만 키 필요.
+                if (engine == "claude" and os.getenv("CLAUDE_BACKEND", "cli").strip().lower() == "api"
+                        and not os.getenv("ANTHROPIC_API_KEY", "")):
+                    ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
@@ -1637,8 +1641,10 @@ def build_wizard_ui(
 
         engine = engine_radio.value
 
-        if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
+        # Claude는 기본이 CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine == "claude" and os.getenv("CLAUDE_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("ANTHROPIC_API_KEY", "")):
+            ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
         if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
             ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
@@ -1942,8 +1948,10 @@ def build_wizard_ui(
 
         engine = engine_radio.value
 
-        if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
+        # Claude는 기본이 CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine == "claude" and os.getenv("CLAUDE_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("ANTHROPIC_API_KEY", "")):
+            ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
         if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
             ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
