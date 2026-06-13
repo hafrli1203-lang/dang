@@ -152,10 +152,37 @@ class OpenAIImageProvider:
         return Image.open(BytesIO(data))
 
 
+def get_image_provider(backend: str | None = None):
+    """이미지 프로바이더 팩토리.
+
+    기본은 gti CLI(`OPENAI_IMAGE_BACKEND=cli`) — ChatGPT 구독 세션으로 동작하며
+    API 키가 필요 없다. 텍스트(Claude/codex CLI)와 동일한 '구독만으로' 정책.
+
+    `OPENAI_IMAGE_BACKEND=api`로 두면 공식 OpenAI Images API(gpt-image-2,
+    OpenAIProvider)를 쓴다 — gti private 백엔드가 막혔을 때의 폴백.
+
+    두 프로바이더 모두 generate_image(prompt, *, reference_image=, reference_mime=)
+    → (bytes, mime) 동일 계약을 따른다.
+    """
+    backend = (backend or os.getenv("OPENAI_IMAGE_BACKEND", "cli")).strip().lower()
+    if backend == "api":
+        from app.ai.providers import OpenAIProvider
+        return OpenAIProvider()
+    from app.ai.image_cli_provider import GtiImageProvider
+    return GtiImageProvider()
+
+
 def get_image_failure_guide(error_msg: str) -> str:
     """이미지 생성 실패 시 프롬프트 개선 가이드를 반환."""
     msg = str(error_msg).lower()
 
+    if any(kw in msg for kw in ("codex login", "logged in", "gti", "구독 세션")):
+        return (
+            "이미지 생성에 쓰는 codex 로그인 세션에 문제가 있어요.\n"
+            "- 터미널에서 'codex login'으로 로그인했는지 확인해 주세요\n"
+            "- gti CLI가 설치돼 있는지 확인해 주세요 (npm i -g god-tibo-imagen)\n"
+            "- 그래도 안 되면 .env에 OPENAI_IMAGE_BACKEND=api 와 OPENAI_API_KEY를 넣어 공식 API로 전환할 수 있어요"
+        )
     if any(kw in msg for kw in ("safety", "blocked", "filter", "policy", "content_policy", "harmful", "moderation")):
         return (
             "안전 필터가 이미지를 차단했어요. 이렇게 해 보세요.\n"

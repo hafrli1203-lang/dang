@@ -37,8 +37,10 @@ def thumbnail_page() -> None:
         with ui.element("div").classes("dg-banner dg-banner-info w-full"):
             ui.icon("lightbulb", size="20px")
             ui.label(
-                "참고 이미지(선택)와 프롬프트를 입력하면 AI가 썸네일을 만들어 드려요. "
-                "분위기, 색상, 문구, 이미지 요소를 구체적으로 적을수록 결과가 좋아져요."
+                "당근 피드에선 '광고 같은' 이미지보다 동네 사장님이 직접 찍은 듯한 "
+                "자연스러운 실사 사진이 더 잘 눌려요. 그래서 만들어지는 이미지는 "
+                "디자인·문구 없는 깨끗한 실사로 나와요. 상품·장면·분위기를 구체적으로 "
+                "적어 주세요. (가격/문구는 생성 후 따로 얹는 걸 권장해요.)"
             )
 
         # -- Reference image --
@@ -64,9 +66,8 @@ def thumbnail_page() -> None:
             section_header("text_fields", "프롬프트 입력")
             prompt_input = ui.textarea(
                 placeholder=(
-                    "예: 당근마켓 스타일의 따뜻한 오렌지톤 썸네일, "
-                    "\"신선한 제철 과일 50% 할인\" 문구 포함, "
-                    "밝고 친근한 분위기"
+                    "예: 동네 과일가게 진열대에 제철 딸기를 담은 바구니를 가까이서 찍은 사진, "
+                    "자연광, 사장님이 직접 폰으로 찍은 듯 투박하고 따뜻한 느낌"
                 ),
             ).classes("w-full dg-input").props("rows=4 outlined")
 
@@ -185,18 +186,24 @@ def thumbnail_page() -> None:
         status_label.set_text("썸네일을 만들고 있어요...")
 
         try:
-            from app.ai.providers import OpenAIProvider
+            from app.ai.image_provider import get_image_provider
+            from app.ai.thumbnail_style import build_natural_thumbnail_prompt
 
-            provider = OpenAIProvider()
+            provider = get_image_provider()
             loop = asyncio.get_running_loop()
             ref = page_state["ref_bytes"]
             ref_mime = page_state["ref_mime"]
+
+            # 당근 피드용 자연 실사로 강제 — 광고 티가 나면 스크롤로 넘어간다.
+            final_prompt = build_natural_thumbnail_prompt(
+                prompt_text, has_reference=ref is not None
+            )
 
             if ref is not None:
                 img_bytes, mime = await loop.run_in_executor(
                     None,
                     lambda: provider.generate_image(
-                        prompt_text,
+                        final_prompt,
                         reference_image=ref,
                         reference_mime=ref_mime,
                     ),
@@ -204,7 +211,7 @@ def thumbnail_page() -> None:
             else:
                 img_bytes, mime = await loop.run_in_executor(
                     None,
-                    lambda: provider.generate_image(prompt_text),
+                    lambda: provider.generate_image(final_prompt),
                 )
 
             page_state["result_bytes"] = img_bytes
