@@ -17,6 +17,15 @@ from app.database import (
     export_projects_csv,
     export_performance_csv,
     backup_db,
+    get_latest_content,
+    get_latest_report,
+    get_setting,
+    save_setting,
+)
+from app.onboarding import (
+    compute_onboarding_steps,
+    is_onboarding_complete,
+    onboarding_progress,
 )
 
 
@@ -90,6 +99,9 @@ def project_page() -> None:
                 "새 프로젝트", icon="add", on_click=lambda: _open_create(),
             ).classes("dg-btn-primary")
 
+        # 온보딩 체크리스트 (첫 사용자 안내 — 전부 끝내거나 닫으면 사라짐)
+        onboarding_box = ui.element("div").classes("w-full")
+
         # 카드 그리드
         grid = ui.element("div").classes("dg-project-grid")
 
@@ -112,6 +124,7 @@ def project_page() -> None:
         filtered = [p for p in projects if _matches(p, q)] if q else projects
         count_label.set_text(f"광고주 프로젝트 {len(projects)}개")
         selected = nicegui_app.storage.user.get("current_project_id")
+        _render_onboarding()
 
         with grid:
             if not projects:
@@ -171,6 +184,78 @@ def project_page() -> None:
                             ui.label("선택됨").classes("dg-badge dg-badge-success")
                 # 카드 클릭 = 현재 프로젝트로 선택
                 card.on("click", lambda _, _pid=pid: _select(_pid))
+
+    def _dismiss_onboarding() -> None:
+        save_setting("onboarding_dismissed", "1")
+        onboarding_box.clear()
+
+    def _onboarding_click(step) -> None:
+        if step.key == "project" and not step.done:
+            _open_create()
+            return
+        ui.navigate.to(step.route)
+
+    def _render_onboarding() -> None:
+        onboarding_box.clear()
+        if get_setting("onboarding_dismissed") == "1":
+            return
+        projects = get_projects()
+        flags = {
+            "has_project": bool(projects),
+            "has_strategy": any(get_latest_content(p["id"], "strategy") for p in projects),
+            "has_planning": any(get_latest_content(p["id"], "planning") for p in projects),
+            "has_ad_settings": any(get_latest_content(p["id"], "ad_settings") for p in projects),
+            "has_proposal": any(get_latest_content(p["id"], "wizard_proposal") for p in projects),
+            "has_report": any(get_latest_report(p["id"]) for p in projects),
+        }
+        steps = compute_onboarding_steps(flags)
+        if is_onboarding_complete(steps):
+            return  # 전부 끝나면 자동으로 사라짐
+        done, total = onboarding_progress(steps)
+
+        with onboarding_box:
+            with ui.card().classes("w-full").style("border:1px solid var(--dg-border)"):
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.icon("rocket_launch", size="20px").style("color: var(--dg-primary)")
+                    ui.label(f"시작 가이드 · {done}/{total} 완료").style(
+                        "font-weight:700; color: var(--dg-text-primary)"
+                    )
+                    ui.space()
+                    ui.button(
+                        "다시 보지 않기", on_click=_dismiss_onboarding, color=None,
+                    ).props("flat dense no-caps").style(
+                        "font-size:11px; color: var(--dg-text-tertiary)"
+                    )
+                # 진행 바
+                with ui.element("div").style(
+                    "width:100%; height:6px; background: var(--dg-surface); "
+                    "border-radius:999px; overflow:hidden; margin:8px 0"
+                ):
+                    ui.element("div").style(
+                        f"width:{int(done / total * 100)}%; height:100%; "
+                        "background: var(--dg-primary); border-radius:999px"
+                    )
+                # 단계 칩
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for s in steps:
+                        icon = "check_circle" if s.done else "radio_button_unchecked"
+                        color = "var(--dg-primary)" if s.done else "var(--dg-text-tertiary)"
+                        opacity = "0.6" if s.done else "1"
+                        chip = ui.element("div").style(
+                            "display:flex; align-items:center; gap:6px; padding:8px 12px; "
+                            "border:1px solid var(--dg-border); border-radius:10px; "
+                            f"cursor:pointer; opacity:{opacity}"
+                        )
+                        with chip:
+                            ui.icon(icon, size="18px").style(f"color:{color}")
+                            with ui.column().classes("gap-0"):
+                                ui.label(s.label).style(
+                                    "font-size:12px; font-weight:600; color: var(--dg-text-primary)"
+                                )
+                                ui.label(s.desc).style(
+                                    "font-size:10px; color: var(--dg-text-tertiary)"
+                                )
+                        chip.on("click", lambda _, _s=s: _onboarding_click(_s))
 
     def _select(pid: int) -> None:
         nicegui_app.storage.user["current_project_id"] = pid
