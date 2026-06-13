@@ -65,6 +65,19 @@ class TestAdRecordFields(_IsolatedDB):
         db.init_db()
         db.init_db()
 
+    def test_latest_for_store(self):
+        p1 = db.save_project({"name": "매장A", "target_radius_km": "5"})
+        p2 = db.save_project({"name": "매장A", "target_radius_km": "3"})
+        db.save_project({"name": "매장B"})
+        latest = db.get_latest_project_for_store("매장A")
+        self.assertEqual(latest["id"], p2)
+        self.assertEqual(latest["target_radius_km"], "3")
+        # 현재 캠페인 제외 → 직전 것
+        prev = db.get_latest_project_for_store("매장A", exclude_id=p2)
+        self.assertEqual(prev["id"], p1)
+        # 없는 매장
+        self.assertIsNone(db.get_latest_project_for_store("없는매장"))
+
 
 class TestThumbnails(_IsolatedDB):
     def test_crud_roundtrip(self):

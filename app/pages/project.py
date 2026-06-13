@@ -23,6 +23,7 @@ from app.database import (
     get_latest_content,
     get_latest_report,
     get_thumbnail_counts,
+    get_latest_project_for_store,
     get_setting,
     save_setting,
 )
@@ -141,9 +142,15 @@ def project_page() -> None:
         ).classes("w-full mt-2 dg-input").props("outlined dense rows=4")
 
         # ══ 당근 광고 세팅 (기록용) — 당근 '광고그룹 수정' 화면 구조 ══
-        ui.label("당근 광고 세팅 (기록용)").classes("dg-section-title").style(
-            "margin-top: 18px; font-size: 14px"
-        )
+        with ui.row().classes("w-full items-center no-wrap").style("margin-top: 18px"):
+            ui.label("당근 광고 세팅 (기록용)").classes("dg-section-title").style(
+                "font-size: 14px"
+            )
+            ui.space()
+            ui.button(
+                "전달에서 불러오기", icon="history", color=None,
+                on_click=lambda: _load_prev(),
+            ).props("flat dense no-caps").classes("dg-quick-link")
         ui.label(
             "당근에서 실제로 설정한 값을 기록해두면 다음 달에 다시 입력하지 않아도 돼요."
         ).classes("dg-text-sm").style("margin-top: 2px")
@@ -426,6 +433,38 @@ def project_page() -> None:
         nicegui_app.storage.user["current_project_id"] = pid
         ui.navigate.to(path)
 
+    def _prefill_ad_record_from(values: dict) -> None:
+        """광고 기록(당근 세팅) 필드만 채운다 — _fill_form/전달 불러오기 공용."""
+        target_radius_km_in.value = values.get("target_radius_km", "") or ""
+        daily_budget_in.value = values.get("daily_budget", "") or ""
+        target_gender_in.value = values.get("target_gender", "") or None
+        bid_type_in.value = values.get("bid_type", "") or None
+        selected_ages.clear()
+        selected_ages.update(a for a in (values.get("target_age", "") or "").split(",") if a)
+        _refresh_age_chips()
+        ad_titles_in.value = values.get("ad_titles", "") or ""
+        coupon_info_in.value = values.get("coupon_info", "") or ""
+
+    def _load_prev() -> None:
+        """현재 매장명 기준 직전 캠페인의 타겟/예산/소재/쿠폰을 불러와 프리필."""
+        store = (name_in.value or "").strip()
+        if not store:
+            ui.notify("먼저 광고주명(매장)을 입력해 주세요.", type="warning")
+            return
+        prev = get_latest_project_for_store(store, exclude_id=state["current_id"])
+        if not prev:
+            ui.notify(f"'{store}'의 이전 캠페인 기록이 없어요.", type="info")
+            return
+        # 재사용 가능한 필드 전부 복사 (캠페인명은 월마다 바뀌므로 제외)
+        industry_in.value = prev.get("industry", "") or ""
+        region_in.value = prev.get("region", "") or ""
+        goal_in.value = prev.get("goal", "") or ""
+        budget_in.value = prev.get("budget", "") or ""
+        benefits_in.value = prev.get("benefits", "") or ""
+        reference_in.value = prev.get("reference_url", "") or ""
+        _prefill_ad_record_from(prev)
+        ui.notify("전달 설정을 불러왔어요. 캠페인명·월만 바꿔주세요.", type="positive")
+
     def _fill_form(p: dict | None) -> None:
         values = p or {}
         name_in.value = values.get("name", "")
@@ -437,16 +476,7 @@ def project_page() -> None:
         period_in.value = values.get("period", "") or ""
         benefits_in.value = values.get("benefits", "") or ""
         reference_in.value = values.get("reference_url", "") or ""
-        # 광고 기록 (당근 세팅)
-        target_radius_km_in.value = values.get("target_radius_km", "") or ""
-        daily_budget_in.value = values.get("daily_budget", "") or ""
-        target_gender_in.value = values.get("target_gender", "") or None
-        bid_type_in.value = values.get("bid_type", "") or None
-        selected_ages.clear()
-        selected_ages.update(a for a in (values.get("target_age", "") or "").split(",") if a)
-        _refresh_age_chips()
-        ad_titles_in.value = values.get("ad_titles", "") or ""
-        coupon_info_in.value = values.get("coupon_info", "") or ""
+        _prefill_ad_record_from(values)  # 광고 기록 (당근 세팅)
 
     def _open_create() -> None:
         state["current_id"] = None
@@ -456,9 +486,10 @@ def project_page() -> None:
         form_dlg.open()
 
     def _open_create_for(store_name: str) -> None:
-        """매장 카드의 '+'에서 — 새 소재 생성 폼을 열고 매장명을 미리 채운다."""
+        """매장 카드의 '+'에서 — 새 소재 폼을 열고, 그 매장 직전 캠페인 설정을 자동 프리필."""
         _open_create()
         name_in.value = store_name
+        _load_prev()
 
     def _open_edit(pid: int) -> None:
         p = get_project(pid)

@@ -206,6 +206,26 @@ def get_project(project_id: int) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def get_latest_project_for_store(
+    name: str, exclude_id: Optional[int] = None
+) -> Optional[Dict]:
+    """같은 매장(name)의 가장 최근 캠페인 — 전달 설정 이어받기용."""
+    with get_conn() as conn:
+        if exclude_id is not None:
+            row = conn.execute(
+                "SELECT * FROM projects WHERE name=? AND id!=? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (name, exclude_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM projects WHERE name=? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+        return dict(row) if row else None
+
+
 def delete_project(project_id: int) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
