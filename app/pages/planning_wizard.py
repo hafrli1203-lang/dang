@@ -1534,6 +1534,12 @@ def build_wizard_ui(
                 ).classes("w-full dg-expansion").props("dense"):
                     ui.markdown(_wizard_state["step2_content"][:2000] + ("\n\n..." if len(_wizard_state["step2_content"]) > 2000 else "")).classes("w-full dg-prose")
 
+            # 결과가 있어도 예산 설계를 다시 계산해 재생성에 반영할 수 있게 노출
+            with ui.expansion(
+                "예산 기반 캠페인 설계 (계산해서 재생성에 반영)", icon="calculate",
+            ).classes("w-full dg-expansion").props("dense"):
+                _render_budget_planner_card()
+
             for key in _AD_SETTINGS_SECTION_KEYS:
                 label = _AD_SETTINGS_SECTION_NAMES[key]
                 body = sections.get(key, "(아직 내용이 없어요)")
