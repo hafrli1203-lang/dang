@@ -324,38 +324,8 @@ def report_page() -> None:
         ui.label("성과 보고서").classes("dg-page-title")
         ui.label("광고 성과 데이터를 분석하고 AI 보고서를 만들어 드려요.").classes("dg-page-subtitle")
 
-        # -- Project selector --
-        with ui.card().classes("dg-card w-full"):
-            with ui.row().classes("items-center gap-4"):
-                ui.icon("business", size="20px").style("color: var(--dg-primary)")
-                ui.label("프로젝트").style("font-weight: 600; color: var(--dg-text-primary)")
-                projects = get_projects()
-                def _project_label(p: dict) -> str:
-                    name = p.get("name", "")
-                    campaign = p.get("campaign_name", "")
-                    region = p.get("region", "")
-                    parts = [name]
-                    if campaign:
-                        parts.append(campaign)
-                    if region:
-                        parts.append(region)
-                    return " | ".join(parts)
-                options = {p["id"]: _project_label(p) for p in projects}
-                saved_pid = nicegui_app.storage.user.get("current_project_id")
-                project_sel = ui.select(
-                    options, label="프로젝트 선택",
-                    value=saved_pid if saved_pid in options else None,
-                ).classes("flex-1 dg-select")
-                async def _on_project_change(e) -> None:
-                    new_pid = e.value
-                    nicegui_app.storage.user["current_project_id"] = new_pid
-                    _log = __import__("logging").getLogger("report")
-                    _log.info("프로젝트 전환: pid=%s", new_pid)
-                    await _load_saved_data()
-
-                # NOTE: .on("update:model-value")는 GenericEventArguments라
-                # e.value가 없어 핸들러가 죽는다. on_value_change를 써야 한다.
-                project_sel.on_value_change(_on_project_change)
+        # 프로젝트 선택은 사이드바 컨텍스트 스위처(매장→캠페인)로 일원화됨.
+        # 페이지 로드 시 current_project_id 기준으로 _load_saved_data가 자동 실행된다.
 
         # -- Data Input --
         with ui.card().classes("dg-card w-full"):

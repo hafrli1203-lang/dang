@@ -145,41 +145,9 @@ def planning_page() -> None:
         ui.label("광고 기획").classes("dg-page-title")
         ui.label("AI가 소식글 콘텐츠부터 운영 제안서까지 만들어 드려요.").classes("dg-page-subtitle")
 
-        # -- Project selector --
-        with ui.card().classes("dg-card w-full"):
-            with ui.row().classes("items-center gap-4"):
-                ui.icon("business", size="20px").style("color: var(--dg-primary)")
-                ui.label("프로젝트").style("font-weight: 600; color: var(--dg-text-primary)")
-                projects = get_projects()
-                def _project_label(p: dict) -> str:
-                    name = p.get("name", "")
-                    campaign = p.get("campaign_name", "")
-                    region = p.get("region", "")
-                    parts = [name]
-                    if campaign:
-                        parts.append(campaign)
-                    if region:
-                        parts.append(region)
-                    return " | ".join(parts)
-                options = {p["id"]: _project_label(p) for p in projects}
-                saved_pid = nicegui_app.storage.user.get("current_project_id")
-                project_sel = ui.select(
-                    options, label="프로젝트 선택",
-                    value=saved_pid if saved_pid in options else None,
-                ).classes("flex-1 dg-select")
-
-                # Wizard reset ref (filled after wizard is built)
-                _wizard_reset_ref: dict = {"fn": None}
-
-                def on_project_change(e) -> None:
-                    nicegui_app.storage.user["current_project_id"] = e.value
-                    _refresh_project_info()
-                    # Reset wizard on project change
-                    if _wizard_reset_ref["fn"]:
-                        _wizard_reset_ref["fn"]()
-
-                # GenericEventArguments에는 e.value가 없어 on_value_change를 써야 한다.
-                project_sel.on_value_change(on_project_change)
+        # 프로젝트 선택은 사이드바 컨텍스트 스위처(매장→캠페인)로 일원화됨.
+        # 여기서는 current_project_id 기준으로 정보 배너만 표시한다.
+        _wizard_reset_ref: dict = {"fn": None}
 
         # -- Project info banner --
         project_banner = ui.element("div").classes("dg-banner dg-banner-info w-full hidden")
