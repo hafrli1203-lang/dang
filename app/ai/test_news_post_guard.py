@@ -21,7 +21,26 @@ _BODY_PAD = "동네에서 가장 정성스러운 빵을 만드는 곳이에요. 
 _GOOD_BLOCK = """\
 👆 쿠폰부터 받고 글을 읽어주세요! 👆
 
-제목: 동네 빵집, 이 가격에 이 퀄리티?
+제목: 동네 빵집, 크로아상 2,500원?
+
+요즘 빵값 너무 비싸지 않으셨어요?
+저희 매장은 매일 새벽 반죽합니다.
+크로아상 한 개 2,500원, 세 개 사면 6,000원에 드려요.
+
+{body_pad}
+오늘 갓 구운 빵이 준비되어 있습니다.
+채팅으로 문의 주시면 예약도 도와드려요.
+
+궁금한 점 있으시면 편하게 채팅 주세요!
+
+강남구에서 만나요!
+""".format(body_pad=_BODY_PAD)
+
+# 가성비형에 숫자 앵커가 전혀 없는 블록 (가격/구성 숫자 누락) — 검증 실패 픽스처
+_NO_ANCHOR_BLOCK = """\
+👆 쿠폰부터 받고 글을 읽어주세요! 👆
+
+제목: 동네 빵집, 이 구성 실화인가요?
 
 요즘 빵값 너무 비싸지 않으셨어요?
 저희 매장은 매일 새벽 반죽합니다.
@@ -114,6 +133,38 @@ class TestValidateNewsPost(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("CTA 부족" in e for e in errors))
 
+    def test_price_anchor_missing_in_value_block_fails(self):
+        """가성비형 블록에 가격/숫자 앵커가 없으면 실패 (근본 해결 검증)."""
+        out = f"""\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【소식글 1 | 의심해소형】
+{_GOOD_BLOCK}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【소식글 2 | 가성비형】
+{_NO_ANCHOR_BLOCK}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        ok, errors = validate_news_post(out)
+        self.assertFalse(ok)
+        self.assertTrue(
+            any("앵커" in e and "가성비" in e for e in errors),
+            f"가성비형 가격 앵커 누락이 잡히지 않음: {errors}",
+        )
+
+    def test_doubt_block_without_number_still_ok(self):
+        """의심해소형엔 숫자 규칙이 없다 — 가성비형만 앵커 필요(스코프 고정)."""
+        out = f"""\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【소식글 1 | 의심해소형】
+{_NO_ANCHOR_BLOCK}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【소식글 2 | 가성비형】
+{_GOOD_BLOCK}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        ok, errors = validate_news_post(out)
+        self.assertTrue(ok, f"의심해소형 숫자 없음은 통과해야 함: {errors}")
+
 
     def test_greeting_fails(self):
         """첫 줄 '안녕하세요' 감지."""
@@ -155,7 +206,7 @@ class TestValidateNewsPost(unittest.TestCase):
 
     def test_missing_title_fails(self):
         """제목 누락 감지."""
-        no_title = _GOOD_OUTPUT.replace("제목: 동네 빵집, 이 가격에 이 퀄리티?", "")
+        no_title = _GOOD_OUTPUT.replace("제목: 동네 빵집, 크로아상 2,500원?", "")
         ok, errors = validate_news_post(no_title)
         self.assertFalse(ok)
         self.assertTrue(any("제목" in e for e in errors))

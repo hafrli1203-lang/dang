@@ -72,6 +72,7 @@ FORCED_TEMPLATE = r"""
 (상단 훅 2~4줄: "이 가격에 이 구성?" 충격/팩트형)
 
 (본문: 구성/혜택 구체 나열 → 왜 이 가격인지 이유 → 현장 반응/후기)
+(구체적 가격·숫자를 본문에 최소 1회 명시: 예 6,900원, 50% 할인, 3가지 구성. 장면 묘사에 집중하더라도 숫자 앵커는 빼지 말 것)
 (총 15~25줄, 2~4줄마다 빈 줄로 구분)
 (CTA를 본문 중간과 끝에 자연스럽게 배치)
 
@@ -92,6 +93,7 @@ VALIDATION_RULES: Dict[str, str] = {
     "cta_2x": '각 블록에 CTA 2회 이상 (채팅/문의/확인 등)',
     "body_length": '각 블록 본문 최소 500자',
     "line_breaks": '각 블록 최소 14개 줄바꿈',
+    "price_anchor": '가성비형 블록에 가격/숫자 앵커 1개 이상 (예: 6,900원, 50%, 3가지)',
     "forbidden": '"무조건", "전부", "절대 추가금 없음", "100%" 금지',
 }
 
@@ -115,6 +117,15 @@ _CTA_RE = re.compile(
 _FORBIDDEN_WORDS = ["무조건", "전부", "절대 추가금 없음", "100%"]
 
 _GREETING_RE = re.compile(r"^\s*안녕하세요")
+
+# 가격/숫자 앵커 — 가성비형의 핵심. "이 가격에 이 구성?"이 숫자 없이 추상으로
+# 흐르는 것을 막는다(가성비 대명제: 가격 앵커링 필수). 가성비 블록에만 적용.
+_PRICE_ANCHOR_RE = re.compile(
+    r"\d[\d,]*\s*원"                                  # 6,900원 / 3,000원
+    r"|\d+\s*%"                                       # 50%
+    r"|\d+\s*만\s*원?"                                # 3만원 / 3만
+    r"|\d+\s*(?:개|인분|종|가지|판|장|병|팩|마리|첩|g|kg|ml|L|리터)"  # 8개 / 1인분 / 3가지 (구성 앵커)
+)
 
 
 def _split_blocks(text: str) -> Dict[str, str]:
@@ -192,6 +203,14 @@ def validate_news_post(text: str) -> Tuple[bool, List[str]]:
         newline_count = block.count("\n")
         if newline_count < 14:
             errors.append(f"{prefix} 줄바꿈 부족 (최소 14개 필요, 현재 {newline_count}개)")
+
+        # ── 가격/숫자 앵커 (가성비형 한정) ──
+        # 가성비형은 "이 가격에 이 구성?"이 핵심이라 구체 숫자가 없으면 추상으로 흐른다.
+        # 의심해소형은 신뢰 소구라 숫자를 강제하지 않는다(오탐 방지).
+        if name == "가성비" and not _PRICE_ANCHOR_RE.search(block):
+            errors.append(
+                f"{prefix} 가격/숫자 앵커 누락 (가성비형은 '6,900원·50%·3가지' 등 구체 숫자 1개 이상 필수)"
+            )
 
         # ── 첫 줄 인사말 금지 (제목 제외한 첫 3줄) ──
         content_lines = [
