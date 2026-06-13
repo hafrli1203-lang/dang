@@ -20,31 +20,33 @@ BRAND_CSS = """
 :root {
     --dg-primary: #FF6F0F;
     --dg-primary-hover: #E55A00;
-    --dg-primary-light: #FFF3E8;
-    --dg-primary-50: #FFF8F0;
-    --dg-surface: #F7F8FA;
+    --dg-primary-light: #FFF1E5;
+    --dg-primary-50: #FFF8F2;
+    /* 차분한 뉴트럴 (management 팔레트 기반) — 오렌지는 포인트로만 */
+    --dg-surface: #F8F9FC;
     --dg-card: #FFFFFF;
-    --dg-text-primary: #212124;
-    --dg-text-secondary: #4E5968;
-    --dg-text-tertiary: #868B94;
-    --dg-text-caption: #ADB1BA;
-    --dg-border: #E5E8EB;
-    --dg-border-light: #F2F3F5;
-    --dg-success: #00C853;
-    --dg-success-light: #E8F5E9;
-    --dg-warning: #FF9800;
-    --dg-warning-light: #FFF3E0;
-    --dg-error: #F44336;
-    --dg-error-light: #FFEBEE;
-    --dg-info: #2196F3;
-    --dg-info-light: #E3F2FD;
+    --dg-text-primary: #1A1A2E;
+    --dg-text-secondary: #4B5563;
+    --dg-text-tertiary: #6B7280;
+    --dg-text-caption: #9CA3AF;
+    --dg-border: #E6E7EA;
+    --dg-border-light: #F0F1F3;
+    --dg-success: #16A34A;
+    --dg-success-light: #ECFDF3;
+    --dg-warning: #D97706;
+    --dg-warning-light: #FFF7E8;
+    --dg-error: #DC2626;
+    --dg-error-light: #FDECEC;
+    --dg-info: #2563EB;
+    --dg-info-light: #EFF4FC;
     --dg-radius: 16px;
     --dg-radius-sm: 10px;
     --dg-radius-xs: 6px;
-    --dg-shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
-    --dg-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    --dg-shadow-lg: 0 4px 20px rgba(0,0,0,0.08);
-    --dg-sidebar-width: 230px;
+    --dg-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.04);
+    --dg-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
+    --dg-shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.08);
+    --dg-sidebar-width: 240px;
+    --dg-sidebar-bg: #F1F3F7;
     --dg-header-height: 56px;
 }
 
@@ -79,13 +81,18 @@ body, .q-page {
     border-radius: 10px;
 }
 
-/* == Sidebar == */
+/* == Sidebar (management 스타일: 틴트 배경 + 필 활성) == */
 .dg-sidebar {
-    background: var(--dg-card) !important;
+    background: var(--dg-sidebar-bg) !important;
     border-right: 1px solid var(--dg-border) !important;
-    padding-top: 12px !important;
+    padding-top: 0 !important;
     width: var(--dg-sidebar-width) !important;
     min-width: var(--dg-sidebar-width) !important;
+}
+.dg-workspace-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--dg-border);
 }
 .dg-sidebar .q-drawer__content { overflow-x: hidden; overflow-y: auto; }
 .dg-nav-section-label {
@@ -123,22 +130,27 @@ body, .q-page {
     justify-content: flex-start !important;
 }
 .dg-nav-item:hover {
-    background: var(--dg-surface) !important;
+    background: var(--dg-card) !important;
     color: var(--dg-text-primary) !important;
 }
 .dg-nav-item.active {
-    background: var(--dg-primary-light) !important;
-    color: var(--dg-primary) !important;
+    background: var(--dg-primary) !important;
+    color: #FFFFFF !important;
     font-weight: 600 !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,0.12) !important;
+}
+.dg-nav-item.active:hover {
+    background: var(--dg-primary-hover) !important;
+    color: #FFFFFF !important;
 }
 .dg-nav-item.active .q-icon {
-    color: var(--dg-primary) !important;
+    color: #FFFFFF !important;
 }
 .dg-nav-item .q-icon {
     font-size: 20px !important;
     color: var(--dg-text-tertiary) !important;
 }
-.dg-nav-item.active .q-btn__content { color: var(--dg-primary) !important; }
+.dg-nav-item.active .q-btn__content { color: #FFFFFF !important; }
 
 /* == Cards == */
 .dg-card {
@@ -203,7 +215,8 @@ body, .q-page {
 }
 .dg-btn-primary:hover {
     background: var(--dg-primary-hover) !important;
-    box-shadow: 0 2px 8px rgba(255,111,15,0.3) !important;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.12) !important;
+    transform: translateY(-1px);
 }
 .dg-btn-secondary {
     background: var(--dg-card) !important;
@@ -221,6 +234,11 @@ body, .q-page {
 .dg-btn-secondary:hover {
     background: var(--dg-surface) !important;
     border-color: var(--dg-text-caption) !important;
+    transform: translateY(-1px);
+}
+.dg-btn-success:hover {
+    box-shadow: 0 2px 8px rgba(15,23,42,0.12) !important;
+    transform: translateY(-1px);
 }
 .dg-btn-success {
     background: var(--dg-success) !important;
@@ -283,9 +301,60 @@ body, .q-page {
     transition: all 0.15s ease !important;
     min-width: 0 !important;
 }
+
+/* == Dashboard stat cards (Meta-style summary row) == */
+.dg-stat-card {
+    background: var(--dg-card);
+    border: 1px solid var(--dg-border);
+    border-radius: var(--dg-radius-sm);
+    padding: 18px 20px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dg-stat-card:hover {
+    border-color: #D5DAE1;
+    box-shadow: var(--dg-shadow);
+    transform: translateY(-1px);
+}
+.dg-stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dg-text-tertiary);
+    letter-spacing: -0.1px;
+}
+.dg-stat-value {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--dg-text-primary);
+    letter-spacing: -0.6px;
+    line-height: 1.2;
+}
+.dg-stat-sub {
+    font-size: 11.5px;
+    color: var(--dg-text-caption);
+}
+.dg-stat-delta {
+    font-size: 11.5px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+.dg-stat-delta-good { color: var(--dg-success); }
+.dg-stat-delta-bad { color: var(--dg-error); }
+.dg-stat-delta-neutral { color: var(--dg-text-tertiary); }
+/* 히어로 카드 — 총 광고비 시각 앵커 (2칸 스팬, 차분한 강조) */
+.dg-stat-card--hero {
+    grid-column: span 2;
+    background: var(--dg-card);
+    border: 1px solid var(--dg-border);
+    border-top: 3px solid var(--dg-primary);
+}
+.dg-stat-card--hero .dg-stat-value { font-size: 28px; }
 .dg-kpi-card:hover {
-    border-color: var(--dg-primary) !important;
-    box-shadow: 0 2px 8px rgba(255,111,15,0.1) !important;
+    border-color: #D5DAE1 !important;
+    box-shadow: var(--dg-shadow) !important;
 }
 .dg-kpi-label {
     font-size: 12px !important;
@@ -344,7 +413,8 @@ body, .q-page {
     padding: 12px 20px; border-radius: var(--dg-radius-sm);
     font-size: 13px; font-weight: 500;
 }
-.dg-banner-info    { background: var(--dg-info-light);    color: #1565C0; border: 1px solid #BBDEFB; }
+.dg-banner-info    { background: var(--dg-surface); color: var(--dg-text-secondary); border: 1px solid var(--dg-border); }
+.dg-banner-info .q-icon { color: var(--dg-text-tertiary); }
 .dg-banner-success { background: var(--dg-success-light); color: #2E7D32; border: 1px solid #C8E6C9; }
 .dg-banner-warning { background: var(--dg-warning-light); color: #E65100; border: 1px solid #FFE0B2; }
 .dg-banner-error   { background: var(--dg-error-light);   color: #C62828; border: 1px solid #FFCDD2; }
@@ -365,12 +435,19 @@ body, .q-page {
     font-size: 13px !important;
     color: var(--dg-text-primary) !important;
 }
+.dg-table tbody tr:nth-child(even) td { background: #FAFBFC !important; }
+.dg-table tbody tr:hover td { background: var(--dg-surface) !important; }
 
 /* == Upload == */
 .dg-upload .q-uploader {
     border-radius: var(--dg-radius-sm) !important;
     border: 2px dashed var(--dg-border) !important;
     background: var(--dg-surface) !important;
+}
+.dg-upload .q-uploader__header,
+.q-uploader__header {
+    background: #4B5563 !important;
+    border-radius: var(--dg-radius-sm) var(--dg-radius-sm) 0 0 !important;
 }
 
 /* == Expansion == */
@@ -380,6 +457,7 @@ body, .q-page {
     overflow: hidden;
 }
 .dg-expansion .q-item { min-height: 48px !important; padding: 8px 16px !important; }
+.dg-expansion .q-item:hover { background: var(--dg-surface) !important; }
 .dg-expansion .q-item__label { font-weight: 600 !important; font-size: 14px !important; }
 
 /* == Progress == */
@@ -393,6 +471,71 @@ body, .q-page {
 .dg-empty { text-align: center; padding: 48px 24px; }
 .dg-empty-icon { font-size: 56px !important; color: var(--dg-border) !important; margin-bottom: 16px; }
 .dg-empty-text { font-size: 15px !important; color: var(--dg-text-tertiary) !important; }
+
+/* == Project Card Grid == */
+.dg-project-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    width: 100%;
+}
+.dg-project-card {
+    background: var(--dg-card);
+    border: 1px solid var(--dg-border);
+    border-radius: var(--dg-radius);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    cursor: pointer;
+    min-width: 0;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dg-project-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--dg-shadow-lg);
+    border-color: #D5DAE1;
+}
+.dg-project-card.active {
+    border-color: var(--dg-primary);
+    background: var(--dg-card);
+}
+.dg-avatar {
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    background: var(--dg-primary-light);
+    color: var(--dg-primary);
+    font-weight: 800;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.dg-project-card-title {
+    font-size: 15px; font-weight: 700; letter-spacing: -0.3px;
+    color: var(--dg-text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dg-project-card-sub {
+    font-size: 12px; color: var(--dg-text-tertiary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dg-quick-link {
+    color: var(--dg-text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    text-transform: none !important;
+}
+.dg-quick-link:hover { color: var(--dg-primary) !important; }
+.dg-quick-link .q-icon { color: var(--dg-text-caption) !important; }
+.dg-quick-link:hover .q-icon { color: var(--dg-primary) !important; }
+.dg-meta-chip {
+    font-size: 11.5px; font-weight: 500;
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--dg-surface);
+    color: var(--dg-text-secondary);
+    border: 1px solid var(--dg-border-light);
+    white-space: nowrap;
+}
 
 /* == Project List == */
 .dg-project-item {
@@ -408,7 +551,7 @@ body, .q-page {
 }
 .dg-project-item .q-btn__content { flex-wrap: nowrap !important; justify-content: flex-start !important; gap: 10px !important; }
 .dg-project-item .q-icon { font-size: 18px !important; color: var(--dg-text-caption) !important; flex-shrink: 0 !important; }
-.dg-project-item:hover { background: var(--dg-card) !important; border-color: var(--dg-primary) !important; box-shadow: 0 1px 4px rgba(255,111,15,0.1) !important; }
+.dg-project-item:hover { background: var(--dg-card) !important; border-color: #D5DAE1 !important; box-shadow: var(--dg-shadow-sm) !important; }
 .dg-project-item:hover .q-icon { color: var(--dg-primary) !important; }
 .dg-project-item.active {
     background: var(--dg-primary-light) !important;
@@ -432,9 +575,9 @@ body, .q-page {
     padding: 28px 32px;
 }
 .dg-page-title {
-    font-size: 26px !important; font-weight: 800 !important;
-    color: var(--dg-text-primary) !important; letter-spacing: -0.5px;
-    margin-bottom: 6px !important; line-height: 1.2 !important;
+    font-size: 29px !important; font-weight: 800 !important;
+    color: var(--dg-text-primary) !important; letter-spacing: -1px;
+    margin-bottom: 6px !important; line-height: 1.15 !important;
 }
 .dg-page-subtitle {
     font-size: 14px !important;
@@ -560,7 +703,20 @@ body, .q-page {
 
 
 def inject_theme() -> None:
-    """Inject the brand CSS into the current page."""
+    """Inject the brand CSS into the current page.
+
+    Quasar 컴포넌트(업로더 헤더, 기본 버튼, 탭, 스위치 등)가 쓰는
+    primary 색을 당근 오렌지로 바꿔 기본 파란색이 새는 것을 막는다.
+    """
+    ui.colors(
+        primary="#FF6F0F",
+        secondary="#52483C",
+        accent="#FF8A30",
+        positive="#00A84D",
+        negative="#E5484D",
+        info="#2196F3",
+        warning="#F78C0C",
+    )
     ui.add_css(BRAND_CSS)
 
 

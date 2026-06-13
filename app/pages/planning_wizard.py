@@ -335,7 +335,7 @@ def build_wizard_ui(
     def _render_step1() -> None:
         content_container.clear()
         with content_container:
-            section_header("analytics", "전략 분석", "AI가 타겟, 경쟁 환경, 전략 방향을 분석합니다.")
+            section_header("analytics", "전략 분석", "AI가 타겟, 경쟁 환경, 전략 방향을 분석해 드려요.")
 
             # Show existing strategy if loaded
             if _wizard_state["step1_content"]:
@@ -346,10 +346,10 @@ def build_wizard_ui(
                 with ui.column().classes("w-full gap-3 items-center"):
                     ui.icon("psychology", size="48px").style("color: var(--dg-border)")
                     ui.label(
-                        "프로젝트 정보를 바탕으로 전략 분석을 생성합니다."
+                        "프로젝트 정보를 바탕으로 전략 분석을 만들어 드려요."
                     ).classes("dg-text-sm").style("text-align: center")
                     ui.label(
-                        "타겟 페르소나, 경쟁 환경, 전략 방향, 캠페인 그룹 구성을 포함합니다."
+                        "타겟 페르소나, 경쟁 환경, 전략 방향, 캠페인 그룹 구성이 담겨요."
                     ).classes("dg-label-sm").style("text-align: center")
 
                     with ui.row().classes("gap-3 items-center"):
@@ -377,7 +377,7 @@ def build_wizard_ui(
 
             for key in _STRATEGY_SECTION_KEYS:
                 label = _STRATEGY_SECTION_LABELS[key]
-                body = sections.get(key, "(내용 없음)")
+                body = sections.get(key, "(아직 내용이 없어요)")
                 idx = _STRATEGY_SECTION_KEYS.index(key) + 1
 
                 with ui.expansion(
@@ -424,7 +424,7 @@ def build_wizard_ui(
                             pid = nicegui_app.storage.user.get("current_project_id")
                             if pid:
                                 save_generated_content(pid, "strategy", _wizard_state["step1_content"], content_type="strategy")
-                            ui.notify("편집 저장 완료", type="positive")
+                            ui.notify("수정한 내용을 저장했어요.", type="positive")
 
                         edit_btn.on_click(_toggle_edit)
                         save_btn.on_click(_save_edit)
@@ -454,21 +454,21 @@ def build_wizard_ui(
     async def _generate_strategy() -> None:
         pid = nicegui_app.storage.user.get("current_project_id")
         if not pid:
-            ui.notify("프로젝트를 먼저 선택해주세요.", type="warning")
+            ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
             return
         project = get_project(pid)
         if not project:
-            ui.notify("프로젝트를 찾을 수 없습니다.", type="negative")
+            ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
         engine = engine_radio.value if engine_radio.value != "both" else "claude"
 
         # Validate API key
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("ANTHROPIC_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
         if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("GEMINI_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s1_btn")
@@ -481,7 +481,7 @@ def build_wizard_ui(
             spinner.classes(remove="hidden")
         if status:
             status.classes(remove="hidden")
-            status.set_text("전략 분석 생성 중...")
+            status.set_text("전략 분석을 만들고 있어요...")
 
         try:
             guide, prompt = build_strategy_prompt(project)
@@ -499,11 +499,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="strategy")
 
             _render_strategy_result()
-            ui.notify("전략 분석 생성 완료!", type="positive")
+            ui.notify("전략 분석이 완성됐어요!", type="positive")
 
         except Exception as exc:
             _log.exception("전략 분석 생성 실패: %s", exc)
-            ui.notify(f"전략 분석 생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"전략 분석을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
             if status:
                 status.set_text(f"오류: {exc}")
         finally:
@@ -532,7 +532,7 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("재생성 중...")
+            regen_status.set_text("다시 만들고 있어요...")
 
         try:
             guide, prompt = build_strategy_prompt(project)
@@ -553,11 +553,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="strategy")
 
             _render_strategy_result()
-            ui.notify("전략 분석 재생성 완료!", type="positive")
+            ui.notify("전략 분석을 다시 만들었어요!", type="positive")
 
         except Exception as exc:
             _log.exception("전략 분석 재생성 실패: %s", exc)
-            ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
         finally:
             if regen_btn:
                 regen_btn.props(remove="disabled loading")
@@ -566,7 +566,7 @@ def build_wizard_ui(
 
     def _advance_to_step2() -> None:
         if not _wizard_state["step1_content"]:
-            ui.notify("먼저 전략 분석을 생성해주세요.", type="warning")
+            ui.notify("전략 분석을 먼저 만들어 주세요.", type="warning")
             return
         _wizard_state["current_step"] = 2
         _render_step_indicator()
@@ -577,7 +577,7 @@ def build_wizard_ui(
     def _render_step2() -> None:
         content_container.clear()
         with content_container:
-            section_header("edit_note", "콘텐츠 생성", "전략 분석 결과를 반영하여 소식글과 기획 콘텐츠를 생성합니다.")
+            section_header("edit_note", "콘텐츠 생성", "전략 분석 결과를 반영해 소식글과 기획 콘텐츠를 만들어요.")
 
             # Strategy summary (collapsible)
             if _wizard_state["step1_content"]:
@@ -668,7 +668,7 @@ def build_wizard_ui(
                             if pid:
                                 save_generated_content(pid, "edited", new_text)
                             _update_result_display(new_text)
-                            ui.notify("편집 저장 완료", type="positive")
+                            ui.notify("수정한 내용을 저장했어요.", type="positive")
 
                         def _cancel_edit_s2(
                             _e, _md=result_md_all, _ea=edit_area_all,
@@ -733,7 +733,7 @@ def build_wizard_ui(
                                     "font-size: 15px; font-weight: 700; color: var(--dg-text-primary);"
                                 )
                                 result_md_thumbnail_gen = ui.markdown(
-                                    "*기획 콘텐츠를 먼저 생성하면 AI 가이드가 여기에 표시됩니다.*"
+                                    "*기획 콘텐츠를 먼저 만들면 AI 가이드가 여기에 표시돼요.*"
                                 ).classes("w-full dg-prose")
 
                             # Right: generation UI
@@ -810,7 +810,7 @@ def build_wizard_ui(
                         ui.label(f"{len(data):,} bytes").classes("dg-label-sm")
                     thumb_ref_clear_btn.classes(remove="hidden")
                 except Exception as exc:
-                    ui.notify(f"이미지 읽기 오류: {exc}", type="negative")
+                    ui.notify(f"이미지를 읽지 못했어요. 파일을 확인하고 다시 올려 주세요. ({exc})", type="negative")
 
             def _clear_thumb_ref() -> None:
                 _thumb_state["ref_bytes"] = None
@@ -823,13 +823,13 @@ def build_wizard_ui(
             async def _generate_thumbnail() -> None:
                 prompt_text = thumb_prompt.value.strip()
                 if not prompt_text:
-                    ui.notify("프롬프트를 입력해주세요.", type="warning")
+                    ui.notify("만들고 싶은 썸네일을 먼저 적어 주세요.", type="warning")
                     return
 
                 thumb_gen_btn.props("disabled loading")
                 thumb_spinner.classes(remove="hidden")
                 thumb_status.classes(remove="hidden")
-                thumb_status.set_text("Gemini 이미지 생성 중...")
+                thumb_status.set_text("썸네일을 만들고 있어요...")
 
                 try:
                     from app.ai.providers import GeminiProvider as _GeminiProvider
@@ -861,17 +861,17 @@ def build_wizard_ui(
                     thumb_result_label.set_text(f"{len(img_bytes):,} bytes | {mime}")
                     thumb_result_container.classes(remove="hidden")
                     thumb_save_btn.classes(remove="hidden")
-                    thumb_status.set_text("생성 완료!")
-                    ui.notify("썸네일 생성 완료!", type="positive", timeout=5000)
+                    thumb_status.set_text("썸네일이 완성됐어요!")
+                    ui.notify("썸네일이 완성됐어요!", type="positive", timeout=5000)
 
                 except ValueError as ve:
-                    thumb_status.set_text("생성 실패")
+                    thumb_status.set_text("썸네일을 만들지 못했어요")
                     ui.notify(str(ve), type="negative", timeout=8000)
                     from app.ai.image_provider import get_image_failure_guide
                     ui.notify(get_image_failure_guide(str(ve)), type="info", timeout=15000, close_button="확인")
                 except Exception as exc:
-                    thumb_status.set_text("오류 발생")
-                    ui.notify(f"오류: {exc}", type="negative", timeout=8000)
+                    thumb_status.set_text("썸네일을 만들지 못했어요")
+                    ui.notify(f"썸네일을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
                     from app.ai.image_provider import get_image_failure_guide
                     ui.notify(get_image_failure_guide(str(exc)), type="info", timeout=15000, close_button="확인")
                 finally:
@@ -883,7 +883,7 @@ def build_wizard_ui(
                 from app.paths import THUMBNAILS_DIR
                 img_bytes = _thumb_state.get("result_bytes")
                 if not img_bytes:
-                    ui.notify("먼저 썸네일을 생성해주세요.", type="warning")
+                    ui.notify("저장할 썸네일이 아직 없어요. 먼저 썸네일을 만들어 주세요.", type="warning")
                     return
                 mime = _thumb_state.get("result_mime", "image/png")
                 ext = ".png" if "png" in mime else ".jpeg" if "jpeg" in mime else ".png"
@@ -897,17 +897,17 @@ def build_wizard_ui(
                 sections = _parse_planning_sections(_s2.get("content", ""))
                 text = sections.get(key, "")
                 if not text:
-                    ui.notify("복사할 내용이 없습니다.", type="warning")
+                    ui.notify("복사할 내용이 아직 없어요.", type="warning")
                     return
                 escaped = json.dumps(text)
                 ui.run_javascript(f'navigator.clipboard.writeText({escaped})')
-                ui.notify("클립보드에 복사되었습니다!", type="positive", timeout=2000)
+                ui.notify("클립보드에 복사했어요!", type="positive", timeout=2000)
 
             def _render_news_card(container, text: str, label: str) -> None:
                 container.clear()
                 if not text.strip():
                     with container:
-                        ui.label(f"*{label} 블록을 찾을 수 없습니다.*").classes("dg-label-sm")
+                        ui.label(f"*{label} 블록을 찾을 수 없어요.*").classes("dg-label-sm")
                     return
 
                 lines = text.strip().splitlines()
@@ -989,7 +989,7 @@ def build_wizard_ui(
                         )
                         clean = text.strip()
                         if not clean:
-                            ui.label("소식글이 없습니다.").classes("dg-label-sm")
+                            ui.label("아직 소식글이 없어요. 콘텐츠를 생성하면 여기에 표시돼요.").classes("dg-label-sm")
                             return
                         lines = clean.splitlines()
                         for line in lines:
@@ -1026,20 +1026,20 @@ def build_wizard_ui(
                 result_md_all.set_content(content)
                 _render_news_card(result_card_v1, sections["version_1"], "의심해소형")
                 _render_news_card(result_card_v2, sections["version_2"], "가성비형")
-                result_md_copies.set_content(sections.get("ad_copies", "") or "*카피 섹션을 찾을 수 없습니다.*")
-                result_md_campaign.set_content(sections.get("campaign_groups", "") or "*캠페인 그룹 섹션을 찾을 수 없습니다.*")
-                result_md_thumbnail.set_content(sections.get("thumbnail_guide", "") or "*썸네일 가이드를 찾을 수 없습니다.*")
+                result_md_copies.set_content(sections.get("ad_copies", "") or "*카피 섹션을 찾을 수 없어요.*")
+                result_md_campaign.set_content(sections.get("campaign_groups", "") or "*캠페인 그룹 섹션을 찾을 수 없어요.*")
+                result_md_thumbnail.set_content(sections.get("thumbnail_guide", "") or "*썸네일 가이드를 찾을 수 없어요.*")
                 _coupon_naming = ""
                 if sections.get("coupon_spec"):
                     _coupon_naming += "### 쿠폰 스펙\n" + sections["coupon_spec"]
                 if sections.get("naming_convention"):
                     _coupon_naming += "\n### 캠페인 네이밍\n" + sections["naming_convention"]
-                result_md_coupon.set_content(_coupon_naming or "*쿠폰/네이밍 섹션을 찾을 수 없습니다.*")
+                result_md_coupon.set_content(_coupon_naming or "*쿠폰/네이밍 섹션을 찾을 수 없어요.*")
                 _render_mobile_frame(mobile_frame_v1, sections["version_1"], "소식글 1 | 의심해소형")
                 _render_mobile_frame(mobile_frame_v2, sections["version_2"], "소식글 2 | 가성비형")
                 # Update thumbnail generation tab guide
                 result_md_thumbnail_gen.set_content(
-                    sections.get("thumbnail_guide", "") or "*썸네일 가이드를 찾을 수 없습니다.*"
+                    sections.get("thumbnail_guide", "") or "*썸네일 가이드를 찾을 수 없어요.*"
                 )
                 result_card.classes(remove="hidden")
                 feedback_card_s2.classes(remove="hidden")
@@ -1049,11 +1049,11 @@ def build_wizard_ui(
             async def _generate_content() -> None:
                 pid = nicegui_app.storage.user.get("current_project_id")
                 if not pid:
-                    ui.notify("프로젝트를 먼저 선택해주세요.", type="warning")
+                    ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
                     return
                 project = get_project(pid)
                 if not project:
-                    ui.notify("프로젝트를 찾을 수 없습니다.", type="negative")
+                    ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
                     return
 
                 engine = engine_radio.value
@@ -1068,20 +1068,20 @@ def build_wizard_ui(
 
                 # Validate API keys
                 if engine in ("claude", "both") and not os.getenv("ANTHROPIC_API_KEY", ""):
-                    ui.notify("ANTHROPIC_API_KEY가 설정되지 않았습니다.", type="negative")
+                    ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
                     return
                 if engine in ("gemini", "both") and not os.getenv("GEMINI_API_KEY", ""):
-                    ui.notify("GEMINI_API_KEY가 설정되지 않았습니다.", type="negative")
+                    ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
                     return
 
                 try:
-                    _set_step("1/3 프롬프트 생성 중...")
+                    _set_step("1/3 콘텐츠 작성을 준비하고 있어요...")
                     strategy_ctx = _wizard_state.get("step1_content", "")
                     guide, prompt = build_planning_prompt(
                         project, extra, category=cat, strategy=strat,
@@ -1094,11 +1094,11 @@ def build_wizard_ui(
                     loop = asyncio.get_running_loop()
 
                     if _s2["cancelled"]:
-                        ui.notify("생성이 중단되었습니다.", type="warning")
+                        ui.notify("생성을 중단했어요.", type="warning")
                         return
 
                     if engine == "both":
-                        _set_step("2/3 Claude + Gemini 동시 호출 중...")
+                        _set_step("2/3 Claude와 Gemini가 동시에 작성하고 있어요...")
                         claude_guide, _ = build_planning_prompt(
                             project, extra, category=cat, strategy=strat, engine="claude",
                             strategy_context=strategy_ctx,
@@ -1117,21 +1117,21 @@ def build_wizard_ui(
                             loop.run_in_executor(None, lambda: gemini_p.generate_text(prompt, system_prompt=gemini_guide)),
                         )
                         if _s2["cancelled"]:
-                            ui.notify("생성이 중단되었습니다.", type="warning")
+                            ui.notify("생성을 중단했어요.", type="warning")
                             return
                         content = (
                             f"## [Claude 결과]\n\n{c_text}\n\n"
                             f"---\n\n## [Gemini 결과]\n\n{g_text}"
                         )
                     else:
-                        _set_step(f"2/3 {engine.capitalize()} 호출 중...")
+                        _set_step(f"2/3 {engine.capitalize()}가 콘텐츠를 작성하고 있어요...")
                         provider = get_provider(engine)
                         content = await loop.run_in_executor(None, lambda: provider.generate_text(prompt, system_prompt=guide))
                         if _s2["cancelled"]:
-                            ui.notify("생성이 중단되었습니다.", type="warning")
+                            ui.notify("생성을 중단했어요.", type="warning")
                             return
 
-                    _set_step("3/3 결과 저장 중...")
+                    _set_step("3/3 결과를 저장하고 있어요...")
                     _s2["content"] = content
                     _s2["engine"] = engine
                     _wizard_state["step2_content"] = content
@@ -1139,11 +1139,11 @@ def build_wizard_ui(
                     save_generated_content(pid, engine, content)
 
                     _update_result_display(content)
-                    ui.notify("기획 콘텐츠 생성 완료!", type="positive")
+                    ui.notify("기획 콘텐츠가 완성됐어요!", type="positive")
 
                 except Exception as exc:
                     _log.exception("기획 콘텐츠 생성 실패: %s", exc)
-                    ui.notify(f"오류: {exc}", type="negative", timeout=12000, close_button="확인")
+                    ui.notify(f"콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=12000, close_button="확인")
                 finally:
                     spinner.classes("hidden")
                     cancel_btn.classes("hidden")
@@ -1193,7 +1193,7 @@ def build_wizard_ui(
                     regen_spinner.classes(remove="hidden")
                 if regen_status:
                     regen_status.classes(remove="hidden")
-                    regen_status.set_text("재생성 중...")
+                    regen_status.set_text("다시 만들고 있어요...")
 
                 try:
                     cat = category_sel.value or "default"
@@ -1224,11 +1224,11 @@ def build_wizard_ui(
                     save_generated_content(pid, engine, content)
 
                     _update_result_display(content)
-                    ui.notify("콘텐츠 재생성 완료!", type="positive")
+                    ui.notify("콘텐츠를 다시 만들었어요!", type="positive")
 
                 except Exception as exc:
                     _log.exception("콘텐츠 재생성 실패: %s", exc)
-                    ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
+                    ui.notify(f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
                 finally:
                     if regen_btn:
                         regen_btn.props(remove="disabled loading")
@@ -1241,10 +1241,10 @@ def build_wizard_ui(
                 import tempfile
                 content = _s2.get("content", "")
                 if not content:
-                    raise ValueError("먼저 콘텐츠를 생성해주세요.")
+                    raise ValueError("콘텐츠를 먼저 만들어 주세요.")
                 project = get_project(pid_snapshot) if pid_snapshot else None
                 if not project:
-                    raise ValueError("프로젝트를 선택해주세요.")
+                    raise ValueError("프로젝트를 선택해 주세요.")
                 name = project.get("name", "unknown")
                 project_meta = {
                     k: project.get(k, "")
@@ -1257,7 +1257,7 @@ def build_wizard_ui(
 
             async def _export_default() -> None:
                 download_status.classes(remove="hidden")
-                download_status.set_text("DOCX 파일 준비 중...")
+                download_status.set_text("DOCX 파일을 준비하고 있어요...")
                 try:
                     pid_snap = nicegui_app.storage.user.get("current_project_id")
                     loop = asyncio.get_running_loop()
@@ -1268,12 +1268,12 @@ def build_wizard_ui(
                 except ValueError as ve:
                     ui.notify(str(ve), type="warning")
                 except Exception as exc:
-                    download_status.set_text("내보내기 오류")
-                    ui.notify(f"내보내기 오류: {exc}", type="negative")
+                    download_status.set_text("내보내지 못했어요")
+                    ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
             async def _export_default_pdf() -> None:
                 download_status.classes(remove="hidden")
-                download_status.set_text("PDF 파일 준비 중...")
+                download_status.set_text("PDF 파일을 준비하고 있어요...")
                 try:
                     import tempfile
                     pid_snap = nicegui_app.storage.user.get("current_project_id")
@@ -1301,17 +1301,17 @@ def build_wizard_ui(
                         download_status.set_text(f"{pdf_fname} 저장 완료")
                         ui.notify(f"{pdf_fname}", type="positive", timeout=8000, close_button="확인")
                     except ImportError:
-                        ui.notify("PDF 변환을 위해 docx2pdf 패키지가 필요합니다. pip install docx2pdf", type="warning")
+                        ui.notify("PDF로 저장하려면 docx2pdf 설치가 필요해요. 터미널에서 pip install docx2pdf를 실행해 주세요.", type="warning")
                         download_status.set_text("PDF 변환 불가 - docx2pdf 없음")
                     except Exception as pdf_exc:
-                        ui.notify(f"PDF 변환 실패: {pdf_exc}\nDOCX로 대체 저장합니다.", type="warning")
+                        ui.notify(f"PDF로 바꾸지 못해서 DOCX로 저장했어요. ({pdf_exc})", type="warning")
                         ExportManager.save_default(docx_bytes, fname)
                         download_status.set_text(f"{fname} 저장 완료 (DOCX 대체)")
                 except ValueError as ve:
                     ui.notify(str(ve), type="warning")
                 except Exception as exc:
-                    download_status.set_text("내보내기 오류")
-                    ui.notify(f"내보내기 오류: {exc}", type="negative")
+                    download_status.set_text("내보내지 못했어요")
+                    ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
             # ── Load saved content ───────────────────────────────────────────
 
@@ -1333,7 +1333,7 @@ def build_wizard_ui(
 
     def _advance_to_step3() -> None:
         if not _wizard_state["step2_content"]:
-            ui.notify("먼저 콘텐츠를 생성해주세요.", type="warning")
+            ui.notify("콘텐츠를 먼저 만들어 주세요.", type="warning")
             return
         _wizard_state["current_step"] = 3
         _render_step_indicator()
@@ -1344,7 +1344,7 @@ def build_wizard_ui(
     def _render_step3() -> None:
         content_container.clear()
         with content_container:
-            section_header("ads_click", "광고 세팅 가이드", "전략과 콘텐츠를 바탕으로 당근 전문가모드 광고 세팅 가이드를 생성합니다.")
+            section_header("ads_click", "광고 세팅 가이드", "전략과 콘텐츠를 바탕으로 당근 전문가모드 광고 세팅 가이드를 만들어요.")
 
             # Previous steps context (collapsible)
             if _wizard_state["step1_content"]:
@@ -1364,14 +1364,16 @@ def build_wizard_ui(
                 _render_ad_settings_result()
                 return
 
+            _render_budget_planner_card()
+
             with ui.card().classes("dg-card w-full"):
                 with ui.column().classes("w-full gap-3 items-center"):
                     ui.icon("ads_click", size="48px").style("color: var(--dg-border)")
                     ui.label(
-                        "전략 분석과 콘텐츠 결과를 바탕으로 광고 세팅 가이드를 생성합니다."
+                        "전략 분석과 콘텐츠 결과를 바탕으로 광고 세팅 가이드를 만들어 드려요."
                     ).classes("dg-text-sm").style("text-align: center")
                     ui.label(
-                        "캠페인 구조, 타겟팅, 예산 배분, 소재 배치, 성과 측정 계획을 포함합니다."
+                        "캠페인 구조, 타겟팅, 예산 배분, 소재 배치, 성과 측정 계획이 담겨요."
                     ).classes("dg-label-sm").style("text-align: center")
 
                     with ui.row().classes("gap-3 items-center"):
@@ -1392,6 +1394,122 @@ def build_wizard_ui(
                     "이전 단계로", icon="arrow_back",
                     on_click=lambda: _go_to_step(2),
                 ).classes("dg-btn-secondary")
+
+    def _render_budget_planner_card() -> None:
+        """예산 기반 캠페인 설계 카드 (룰 엔진 — AI 호출 없음).
+
+        일예산을 넣으면 자동+수동 페어 가능 여부와 캠페인 세팅표를 즉시 계산한다.
+        계산 결과는 wizard state에 저장되어 Step 3 AI 프롬프트에 그대로 주입된다.
+        """
+        from app.engine.budget_planner import (
+            BROAD_AGE_BAND,
+            DEFAULT_AGE_BANDS,
+            SETTING_TABLE_COLUMNS,
+            SIMPLE_AGE_BANDS,
+            plan_table_rows,
+            plan_to_prompt_context,
+            recommend_structure,
+        )
+
+        pid = nicegui_app.storage.user.get("current_project_id")
+        proj = get_project(pid) if pid else None
+        raw_region = ((proj or {}).get("region") or "").strip()
+        default_region = raw_region.split()[-1] if raw_region else "우리동네"
+
+        with ui.card().classes("dg-card w-full"):
+            section_header(
+                "calculate", "예산 기반 캠페인 설계",
+                "일예산을 넣으면 자동+수동 페어가 가능한지 계산해서 세팅표를 만들어 드려요. AI는 이 설계를 그대로 따라요.",
+            )
+            with ui.row().classes("w-full gap-4 items-end flex-wrap"):
+                with ui.column().classes("gap-1"):
+                    ui.label("일예산 (원)").classes("dg-label-sm")
+                    plan_budget_in = ui.number(
+                        value=30000, min=0, step=5000, format="%d",
+                    ).props("outlined dense").classes("w-32 dg-input")
+                with ui.column().classes("gap-1"):
+                    ui.label("지역 (캠페인명용)").classes("dg-label-sm")
+                    plan_region_in = ui.input(value=default_region).props(
+                        "outlined dense"
+                    ).classes("w-32 dg-input")
+                with ui.column().classes("gap-1"):
+                    ui.label("성별").classes("dg-label-sm")
+                    plan_gender_sel = ui.select(
+                        ["여성", "남성", "전체"], value="여성",
+                    ).props("outlined dense").classes("w-24 dg-select")
+                with ui.column().classes("gap-1"):
+                    ui.label("핵심 연령대").classes("dg-label-sm")
+                    plan_age_sel = ui.select(
+                        [BROAD_AGE_BAND] + SIMPLE_AGE_BANDS + DEFAULT_AGE_BANDS,
+                        value="40대",
+                    ).props("outlined dense").classes("w-28 dg-select")
+                with ui.column().classes("gap-1"):
+                    ui.label("소구 키워드 (캠페인명용)").classes("dg-label-sm")
+                    plan_appeal_in = ui.input(value="핵심소구").props(
+                        "outlined dense"
+                    ).classes("w-32 dg-input")
+                with ui.column().classes("gap-1"):
+                    ui.label("목표 문의당 비용 (선택)").classes("dg-label-sm")
+                    plan_cpa_in = ui.number(
+                        value=None, min=0, step=1000, format="%d",
+                    ).props("outlined dense").classes("w-32 dg-input")
+                plan_validated_sw = ui.switch("검증된 소재/타겟 있음")
+                ui.button(
+                    "설계 계산", icon="calculate",
+                    on_click=lambda: _calc_budget_plan(),
+                ).classes("dg-btn-primary dg-btn-sm")
+
+            plan_result_box = ui.column().classes("w-full gap-2 mt-2")
+
+        def _calc_budget_plan() -> None:
+            try:
+                budget = int(plan_budget_in.value or 0)
+                target_cpa = int(plan_cpa_in.value) if plan_cpa_in.value else None
+                plan = recommend_structure(
+                    budget,
+                    region=(plan_region_in.value or "우리동네").strip() or "우리동네",
+                    gender=plan_gender_sel.value or "여성",
+                    age_band=plan_age_sel.value or "40대",
+                    appeal=(plan_appeal_in.value or "핵심소구").strip() or "핵심소구",
+                    has_validated_creative=bool(plan_validated_sw.value),
+                    target_cpa=target_cpa,
+                )
+            except Exception as exc:
+                ui.notify(f"설계를 계산하지 못했어요. 입력값을 확인해 주세요. ({exc})", type="negative")
+                return
+
+            _wizard_state["budget_plan_text"] = plan_to_prompt_context(plan)
+
+            plan_result_box.clear()
+            with plan_result_box:
+                banner_cls = (
+                    "dg-banner-warning"
+                    if plan.tier in ("below_minimum", "single")
+                    else "dg-banner-info"
+                )
+                with ui.element("div").classes(f"dg-banner {banner_cls} w-full"):
+                    ui.icon("insights", size="18px")
+                    with ui.column().classes("gap-1"):
+                        ui.label(plan.mode_label).style("font-weight: 700; font-size: 13px")
+                        ui.label(plan.feasibility_note).style("font-size: 12px")
+                for w in plan.warnings:
+                    ui.label(w).classes("dg-label-sm").style("color: var(--dg-warning)")
+                if plan.campaigns:
+                    ui.table(
+                        columns=SETTING_TABLE_COLUMNS,
+                        rows=plan_table_rows(plan),
+                        row_key="name",
+                    ).classes("w-full dg-table").props("dense flat bordered")
+                if plan.next_steps:
+                    ui.label("다음 단계").style(
+                        "font-size: 13px; font-weight: 600; margin-top: 4px"
+                    )
+                    for s in plan.next_steps:
+                        ui.label(f"- {s}").classes("dg-label-sm")
+                ui.label(
+                    "이 설계는 '광고 세팅 가이드 생성'을 누르면 AI에게 그대로 전달돼요."
+                ).classes("dg-label-sm").style("color: var(--dg-text-tertiary)")
+            ui.notify("캠페인 설계를 계산했어요. 세팅표를 확인해 보세요.", type="positive")
 
     def _render_ad_settings_result() -> None:
         """Render ad settings results with edit/regenerate controls."""
@@ -1418,7 +1536,7 @@ def build_wizard_ui(
 
             for key in _AD_SETTINGS_SECTION_KEYS:
                 label = _AD_SETTINGS_SECTION_NAMES[key]
-                body = sections.get(key, "(내용 없음)")
+                body = sections.get(key, "(아직 내용이 없어요)")
                 idx = _AD_SETTINGS_SECTION_KEYS.index(key) + 1
 
                 with ui.expansion(
@@ -1463,7 +1581,7 @@ def build_wizard_ui(
                             pid = nicegui_app.storage.user.get("current_project_id")
                             if pid:
                                 save_generated_content(pid, "edited", _wizard_state["step3_content"], content_type="ad_settings")
-                            ui.notify("편집 저장 완료", type="positive")
+                            ui.notify("수정한 내용을 저장했어요.", type="positive")
 
                         edit_btn.on_click(_toggle_edit_s3)
                         save_btn.on_click(_save_edit_s3)
@@ -1493,20 +1611,20 @@ def build_wizard_ui(
     async def _generate_ad_settings() -> None:
         pid = nicegui_app.storage.user.get("current_project_id")
         if not pid:
-            ui.notify("프로젝트를 먼저 선택해주세요.", type="warning")
+            ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
             return
         project = get_project(pid)
         if not project:
-            ui.notify("프로젝트를 찾을 수 없습니다.", type="negative")
+            ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
         engine = engine_radio.value if engine_radio.value != "both" else "claude"
 
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("ANTHROPIC_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
         if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("GEMINI_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s3_btn")
@@ -1519,13 +1637,14 @@ def build_wizard_ui(
             spinner.classes(remove="hidden")
         if status:
             status.classes(remove="hidden")
-            status.set_text("광고 세팅 가이드 생성 중...")
+            status.set_text("광고 세팅 가이드를 만들고 있어요...")
 
         try:
             guide, prompt = build_ad_settings_prompt(
                 project,
                 strategy_context=_wizard_state.get("step1_content", ""),
                 content_context=_wizard_state.get("step2_content", ""),
+                budget_plan_context=_wizard_state.get("budget_plan_text", ""),
             )
             loop = asyncio.get_running_loop()
             provider = get_provider(engine)
@@ -1538,11 +1657,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="ad_settings")
 
             _render_ad_settings_result()
-            ui.notify("광고 세팅 가이드 생성 완료!", type="positive")
+            ui.notify("광고 세팅 가이드가 완성됐어요!", type="positive")
 
         except Exception as exc:
             _log.exception("광고 세팅 가이드 생성 실패: %s", exc)
-            ui.notify(f"광고 세팅 가이드 생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"광고 세팅 가이드를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
             if status:
                 status.set_text(f"오류: {exc}")
         finally:
@@ -1571,13 +1690,14 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("재생성 중...")
+            regen_status.set_text("다시 만들고 있어요...")
 
         try:
             guide, prompt = build_ad_settings_prompt(
                 project,
                 strategy_context=_wizard_state.get("step1_content", ""),
                 content_context=_wizard_state.get("step2_content", ""),
+                budget_plan_context=_wizard_state.get("budget_plan_text", ""),
             )
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
@@ -1595,11 +1715,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="ad_settings")
 
             _render_ad_settings_result()
-            ui.notify("광고 세팅 가이드 재생성 완료!", type="positive")
+            ui.notify("광고 세팅 가이드를 다시 만들었어요!", type="positive")
 
         except Exception as exc:
             _log.exception("광고 세팅 가이드 재생성 실패: %s", exc)
-            ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
         finally:
             if regen_btn:
                 regen_btn.props(remove="disabled loading")
@@ -1608,7 +1728,7 @@ def build_wizard_ui(
 
     def _advance_to_step4() -> None:
         if not _wizard_state["step3_content"]:
-            ui.notify("먼저 광고 세팅 가이드를 생성해주세요.", type="warning")
+            ui.notify("광고 세팅 가이드를 먼저 만들어 주세요.", type="warning")
             return
         _wizard_state["current_step"] = 4
         _render_step_indicator()
@@ -1619,7 +1739,7 @@ def build_wizard_ui(
     def _render_step4() -> None:
         content_container.clear()
         with content_container:
-            section_header("description", "운영 제안서", "전략, 콘텐츠, 광고 세팅을 종합한 통합 운영 제안서를 생성합니다.")
+            section_header("description", "운영 제안서", "전략, 콘텐츠, 광고 세팅을 종합한 통합 운영 제안서를 만들어요.")
 
             # Previous steps context (collapsible)
             if _wizard_state["step1_content"]:
@@ -1649,10 +1769,10 @@ def build_wizard_ui(
                 with ui.column().classes("w-full gap-3 items-center"):
                     ui.icon("description", size="48px").style("color: var(--dg-border)")
                     ui.label(
-                        "모든 분석 결과를 종합하여 통합 운영 제안서를 생성합니다."
+                        "모든 분석 결과를 종합해 통합 운영 제안서를 만들어 드려요."
                     ).classes("dg-text-sm").style("text-align: center")
                     ui.label(
-                        "요약, 타겟, 콘텐츠, 광고 집행, 예산/KPI, 운영 일정, 성과 판단 기준을 포함합니다."
+                        "요약, 타겟, 콘텐츠, 광고 집행, 예산/KPI, 운영 일정, 성과 판단 기준이 담겨요."
                     ).classes("dg-label-sm").style("text-align: center")
 
                     with ui.row().classes("gap-3 items-center"):
@@ -1709,7 +1829,7 @@ def build_wizard_ui(
 
             for key in _WIZARD_PROPOSAL_SECTION_KEYS:
                 label = _WIZARD_PROPOSAL_SECTION_NAMES[key]
-                body = sections.get(key, "(내용 없음)")
+                body = sections.get(key, "(아직 내용이 없어요)")
                 idx = _WIZARD_PROPOSAL_SECTION_KEYS.index(key) + 1
 
                 with ui.expansion(
@@ -1754,7 +1874,7 @@ def build_wizard_ui(
                             pid = nicegui_app.storage.user.get("current_project_id")
                             if pid:
                                 save_generated_content(pid, "edited", _wizard_state["step4_content"], content_type="wizard_proposal")
-                            ui.notify("편집 저장 완료", type="positive")
+                            ui.notify("수정한 내용을 저장했어요.", type="positive")
 
                         edit_btn.on_click(_toggle_edit_s4)
                         save_btn.on_click(_save_edit_s4)
@@ -1788,20 +1908,20 @@ def build_wizard_ui(
     async def _generate_proposal() -> None:
         pid = nicegui_app.storage.user.get("current_project_id")
         if not pid:
-            ui.notify("프로젝트를 먼저 선택해주세요.", type="warning")
+            ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
             return
         project = get_project(pid)
         if not project:
-            ui.notify("프로젝트를 찾을 수 없습니다.", type="negative")
+            ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
         engine = engine_radio.value if engine_radio.value != "both" else "claude"
 
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
-            ui.notify("ANTHROPIC_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
         if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("GEMINI_API_KEY가 설정되지 않았습니다.", type="negative")
+            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s4_btn")
@@ -1814,7 +1934,7 @@ def build_wizard_ui(
             spinner.classes(remove="hidden")
         if status:
             status.classes(remove="hidden")
-            status.set_text("운영 제안서 생성 중...")
+            status.set_text("운영 제안서를 만들고 있어요...")
 
         try:
             guide, prompt = build_wizard_proposal_prompt(
@@ -1834,11 +1954,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="wizard_proposal")
 
             _render_proposal_result()
-            ui.notify("운영 제안서 생성 완료!", type="positive")
+            ui.notify("운영 제안서가 완성됐어요!", type="positive")
 
         except Exception as exc:
             _log.exception("운영 제안서 생성 실패: %s", exc)
-            ui.notify(f"운영 제안서 생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"운영 제안서를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
             if status:
                 status.set_text(f"오류: {exc}")
         finally:
@@ -1867,7 +1987,7 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("재생성 중...")
+            regen_status.set_text("다시 만들고 있어요...")
 
         try:
             guide, prompt = build_wizard_proposal_prompt(
@@ -1892,11 +2012,11 @@ def build_wizard_ui(
             save_generated_content(pid, engine, content, content_type="wizard_proposal")
 
             _render_proposal_result()
-            ui.notify("운영 제안서 재생성 완료!", type="positive")
+            ui.notify("운영 제안서를 다시 만들었어요!", type="positive")
 
         except Exception as exc:
             _log.exception("운영 제안서 재생성 실패: %s", exc)
-            ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
         finally:
             if regen_btn:
                 regen_btn.props(remove="disabled loading")
@@ -1918,7 +2038,7 @@ def build_wizard_ui(
         content_key = f"step{step_num}_content"
         content = _wizard_state.get(content_key, "")
         if not content:
-            ui.notify("먼저 콘텐츠를 생성해주세요.", type="warning")
+            ui.notify("콘텐츠를 먼저 만들어 주세요.", type="warning")
             return
 
         step_names = {1: "전략분석", 2: "콘텐츠", 3: "광고세팅", 4: "운영제안서"}
@@ -2049,18 +2169,18 @@ def build_wizard_ui(
                             pythoncom.CoUninitialize()
                         pdf_bytes = pdf_path.read_bytes()
                         ExportManager.save_default(pdf_bytes, pdf_fname)
-                        ui.notify(f"{pdf_fname} 저장 완료", type="positive", timeout=5000)
+                        ui.notify(f"{pdf_fname} 파일을 저장했어요.", type="positive", timeout=5000)
                     except ImportError:
-                        ui.notify("PDF 변환을 위해 docx2pdf 패키지가 필요합니다. pip install docx2pdf", type="warning")
+                        ui.notify("PDF로 저장하려면 docx2pdf 설치가 필요해요. 터미널에서 pip install docx2pdf를 실행해 주세요.", type="warning")
                     except Exception as pdf_exc:
-                        ui.notify(f"PDF 변환 실패: {pdf_exc}\nDOCX로 대체 저장합니다.", type="warning")
+                        ui.notify(f"PDF로 바꾸지 못해서 DOCX로 저장했어요. ({pdf_exc})", type="warning")
                         ExportManager.save_default(docx_bytes, fname)
-                        ui.notify(f"{fname} 저장 완료", type="positive", timeout=5000)
+                        ui.notify(f"{fname} 파일을 저장했어요.", type="positive", timeout=5000)
                 else:
                     ExportManager.save_default(docx_bytes, fname)
-                    ui.notify(f"{fname} 저장 완료", type="positive", timeout=5000)
+                    ui.notify(f"{fname} 파일을 저장했어요.", type="positive", timeout=5000)
         except Exception as exc:
-            ui.notify(f"내보내기 오류: {exc}", type="negative")
+            ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
     # ── Proposal export handlers ─────────────────────────────────────────────
 
@@ -2069,10 +2189,10 @@ def build_wizard_ui(
         from datetime import datetime as _dt
         content = _wizard_state.get("step4_content", "")
         if not content:
-            raise ValueError("먼저 운영 제안서를 생성해주세요.")
+            raise ValueError("운영 제안서를 먼저 만들어 주세요.")
         project = get_project(pid_snapshot) if pid_snapshot else None
         if not project:
-            raise ValueError("프로젝트를 선택해주세요.")
+            raise ValueError("프로젝트를 선택해 주세요.")
         shop_info = {
             "shop_name": project.get("name", "광고주"),
             "industry": project.get("industry", ""),
@@ -2108,7 +2228,7 @@ def build_wizard_ui(
             export_btn.props("disabled loading")
         if dl_status:
             dl_status.classes(remove="hidden")
-            dl_status.set_text("DOCX 파일 준비 중...")
+            dl_status.set_text("DOCX 파일을 준비하고 있어요...")
         try:
             pid_snap = nicegui_app.storage.user.get("current_project_id")
             loop = asyncio.get_running_loop()
@@ -2121,8 +2241,8 @@ def build_wizard_ui(
             ui.notify(str(ve), type="warning")
         except Exception as exc:
             if dl_status:
-                dl_status.set_text("내보내기 오류")
-            ui.notify(f"내보내기 오류: {exc}", type="negative")
+                dl_status.set_text("내보내지 못했어요")
+            ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
         finally:
             if export_btn:
                 export_btn.props(remove="disabled loading")
@@ -2134,7 +2254,7 @@ def build_wizard_ui(
             export_btn.props("disabled loading")
         if dl_status:
             dl_status.classes(remove="hidden")
-            dl_status.set_text("DOCX 파일 준비 중...")
+            dl_status.set_text("DOCX 파일을 준비하고 있어요...")
         try:
             pid_snap = nicegui_app.storage.user.get("current_project_id")
             loop = asyncio.get_running_loop()
@@ -2146,8 +2266,8 @@ def build_wizard_ui(
             ui.notify(str(ve), type="warning")
         except Exception as exc:
             if dl_status:
-                dl_status.set_text("내보내기 오류")
-            ui.notify(f"내보내기 오류: {exc}", type="negative")
+                dl_status.set_text("내보내지 못했어요")
+            ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
         finally:
             if export_btn:
                 export_btn.props(remove="disabled loading")
@@ -2160,7 +2280,7 @@ def build_wizard_ui(
             export_btn.props("disabled loading")
         if dl_status:
             dl_status.classes(remove="hidden")
-            dl_status.set_text("PDF 파일 준비 중...")
+            dl_status.set_text("PDF 파일을 준비하고 있어요...")
         try:
             pid_snap = nicegui_app.storage.user.get("current_project_id")
             loop = asyncio.get_running_loop()
@@ -2188,11 +2308,11 @@ def build_wizard_ui(
                     dl_status.set_text(f"{pdf_fname} 저장 완료")
                 ui.notify(f"{pdf_fname}", type="positive", timeout=8000, close_button="확인")
             except ImportError:
-                ui.notify("PDF 변환을 위해 docx2pdf 패키지가 필요합니다. pip install docx2pdf", type="warning")
+                ui.notify("PDF로 저장하려면 docx2pdf 설치가 필요해요. 터미널에서 pip install docx2pdf를 실행해 주세요.", type="warning")
                 if dl_status:
                     dl_status.set_text("PDF 변환 불가 - docx2pdf 없음")
             except Exception as pdf_exc:
-                ui.notify(f"PDF 변환 실패: {pdf_exc}\nDOCX로 대체 저장합니다.", type="warning")
+                ui.notify(f"PDF로 바꾸지 못해서 DOCX로 저장했어요. ({pdf_exc})", type="warning")
                 ExportManager.save_default(docx_bytes, fname)
                 if dl_status:
                     dl_status.set_text(f"{fname} 저장 완료 (DOCX 대체)")
@@ -2200,8 +2320,8 @@ def build_wizard_ui(
             ui.notify(str(ve), type="warning")
         except Exception as exc:
             if dl_status:
-                dl_status.set_text("내보내기 오류")
-            ui.notify(f"내보내기 오류: {exc}", type="negative")
+                dl_status.set_text("내보내지 못했어요")
+            ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
         finally:
             if export_btn:
                 export_btn.props(remove="disabled loading")

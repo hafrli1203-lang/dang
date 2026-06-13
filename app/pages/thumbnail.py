@@ -31,19 +31,19 @@ def thumbnail_page() -> None:
 
         # Page header
         ui.label("썸네일 제작").classes("dg-page-title")
-        ui.label("Gemini AI로 당근 광고용 썸네일 이미지를 생성합니다.").classes("dg-page-subtitle")
+        ui.label("AI로 당근 광고용 썸네일 이미지를 만들어요.").classes("dg-page-subtitle")
 
         # -- Guide banner --
         with ui.element("div").classes("dg-banner dg-banner-info w-full"):
             ui.icon("lightbulb", size="20px")
             ui.label(
-                "참고 이미지(선택)와 프롬프트를 입력하면 AI가 썸네일을 생성합니다. "
-                "분위기, 색상, 문구, 이미지 요소를 구체적으로 적을수록 좋습니다."
+                "참고 이미지(선택)와 프롬프트를 입력하면 AI가 썸네일을 만들어 드려요. "
+                "분위기, 색상, 문구, 이미지 요소를 구체적으로 적을수록 결과가 좋아져요."
             )
 
         # -- Reference image --
         with ui.card().classes("dg-card w-full"):
-            section_header("add_photo_alternate", "참고 이미지", "스타일 참고용 이미지를 업로드하면 비슷한 분위기로 생성합니다.")
+            section_header("add_photo_alternate", "참고 이미지", "스타일 참고용 이미지를 올리면 비슷한 분위기로 만들어 드려요.")
 
             ref_preview = ui.column().classes("w-full hidden")
 
@@ -114,7 +114,7 @@ def thumbnail_page() -> None:
             thumb_history_strip.classes("hidden")
             thumb_history_label.classes("hidden")
             return
-        thumb_history_label.set_text(f"이전 생성 ({len(history)}장)")
+        thumb_history_label.set_text(f"이전에 만든 썸네일 ({len(history)}장)")
         thumb_history_label.classes(remove="hidden")
         thumb_history_strip.clear()
         thumb_history_strip.classes(remove="hidden")
@@ -141,7 +141,7 @@ def thumbnail_page() -> None:
             ui.label(f"{len(img_bytes):,} bytes | 복원: {snippet[:20]}").classes("dg-label-sm")
         result_card.classes(remove="hidden")
         save_btn.classes(remove="hidden")
-        ui.notify(f"이미지 복원됨: {snippet[:20]}", type="info", timeout=2000)
+        ui.notify(f"이전 썸네일을 다시 불러왔어요: {snippet[:20]}", type="info", timeout=2000)
 
     # -- Handlers --
 
@@ -162,7 +162,7 @@ def thumbnail_page() -> None:
             ref_clear_btn.classes(remove="hidden")
             _log.info("참고 이미지 업로드: %s (%d bytes)", mime, len(data))
         except Exception as exc:
-            ui.notify(f"이미지 읽기 오류: {exc}", type="negative")
+            ui.notify(f"이미지를 읽지 못했어요. 파일을 확인하고 다시 올려 주세요. ({exc})", type="negative")
 
     def _clear_ref() -> None:
         page_state["ref_bytes"] = None
@@ -176,13 +176,13 @@ def thumbnail_page() -> None:
     async def _generate() -> None:
         prompt_text = prompt_input.value.strip()
         if not prompt_text:
-            ui.notify("프롬프트를 입력해주세요.", type="warning")
+            ui.notify("만들고 싶은 썸네일을 먼저 적어 주세요.", type="warning")
             return
 
         gen_btn.props("disabled loading")
         spinner.classes(remove="hidden")
         status_label.classes(remove="hidden")
-        status_label.set_text("Gemini 이미지 생성 중...")
+        status_label.set_text("썸네일을 만들고 있어요...")
 
         try:
             from app.ai.providers import GeminiProvider
@@ -223,18 +223,18 @@ def thumbnail_page() -> None:
             result_card.classes(remove="hidden")
             save_btn.classes(remove="hidden")
 
-            status_label.set_text("생성 완료!")
+            status_label.set_text("썸네일이 완성됐어요!")
             _refresh_history()
-            ui.notify("썸네일 생성 완료!", type="positive", timeout=5000)
+            ui.notify("썸네일이 완성됐어요!", type="positive", timeout=5000)
 
         except ValueError as ve:
-            status_label.set_text("생성 실패")
+            status_label.set_text("썸네일을 만들지 못했어요")
             ui.notify(str(ve), type="negative", timeout=8000)
             from app.ai.image_provider import get_image_failure_guide
             ui.notify(get_image_failure_guide(str(ve)), type="info", timeout=15000, close_button="확인")
         except Exception as exc:
-            status_label.set_text("오류 발생")
-            ui.notify(f"오류: {exc}", type="negative", timeout=8000)
+            status_label.set_text("썸네일을 만들지 못했어요")
+            ui.notify(f"썸네일을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
             from app.ai.image_provider import get_image_failure_guide
             ui.notify(get_image_failure_guide(str(exc)), type="info", timeout=15000, close_button="확인")
         finally:
@@ -244,7 +244,7 @@ def thumbnail_page() -> None:
     def _save_result() -> None:
         img_bytes = page_state.get("result_bytes")
         if not img_bytes:
-            ui.notify("먼저 썸네일을 생성해주세요.", type="warning")
+            ui.notify("저장할 썸네일이 아직 없어요. 먼저 썸네일을 만들어 주세요.", type="warning")
             return
 
         mime = page_state.get("result_mime", "image/png")

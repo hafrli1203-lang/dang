@@ -29,13 +29,13 @@ class ExportManager:
             _log.info("기본 폴더 저장: %s (%d bytes)", saved, len(data))
         except OSError as exc:
             _log.error("파일 저장 실패: %s — %s", saved, exc)
-            ui.notify(f"파일 저장 실패: {exc}", type="negative", timeout=8000)
+            ui.notify(f"파일을 저장하지 못했어요. 디스크 공간이나 폴더 권한을 확인해 주세요. ({exc})", type="negative", timeout=8000)
             if not is_native_available():
                 ui.download(data, filename=filename)
             return
 
         with ui.dialog() as dlg, ui.card().classes("items-center p-6 gap-3"):
-            ui.label(f"저장 완료: {saved.name}").classes("font-bold")
+            ui.label(f"저장했어요: {saved.name}").classes("font-bold")
             ui.label(str(saved)).classes("text-xs text-gray-500 break-all")
             with ui.row().classes("gap-3 mt-2"):
                 ui.button(
@@ -57,7 +57,7 @@ class ExportManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             _log.info("Save As 저장: %s (%d bytes)", path, len(data))
-            ui.notify(f"저장 완료: {path}", type="positive", timeout=6000, close_button="확인")
+            ui.notify(f"저장했어요: {path}", type="positive", timeout=6000, close_button="확인")
             return True
 
         # browser mode or native cancel → fall back to browser download
@@ -87,7 +87,7 @@ class ExportManager:
                     _log.info("Save As (multi): %s (%d bytes)", path, len(data))
                     saved_any = True
             if saved_any:
-                ui.notify("저장 완료", type="positive", timeout=6000, close_button="확인")
+                ui.notify("모두 저장했어요.", type="positive", timeout=6000, close_button="확인")
             return saved_any
 
         # browser: ui.download 각각

@@ -1893,13 +1893,18 @@ _AD_SETTINGS_PROMPT = """\
 [Step 2 콘텐츠 생성 결과]
 {content_context}
 
+[예산 기반 캠페인 설계 — 룰 엔진 계산 결과]
+{budget_plan}
+
 ---
 아래 5개 섹션을 순서대로, 빠짐없이 작성해주세요.
 
 ## 1. 캠페인 구조 설계
 - 캠페인-광고그룹-소재 구조 (당근 전문가모드 기준)
 - 각 캠페인별 목표 설정 (노출/클릭/문의)
-- Step 1의 캠페인 그룹을 반영한 실제 캠페인 트리 구조
+- [예산 기반 캠페인 설계]가 제공된 경우: 그 세팅표의 캠페인명·입찰방식·일예산을
+  그대로 사용하고 임의로 캠페인을 추가·삭제·변형하지 않는다.
+  세팅표가 없을 때만 Step 1의 캠페인 그룹을 반영해 직접 설계한다.
 
 ## 2. 타겟팅 설정
 - 나이대별 타겟 (Step 1 캠페인 그룹 기반)
@@ -1941,8 +1946,12 @@ def build_ad_settings_prompt(
     project: dict,
     strategy_context: str = "",
     content_context: str = "",
+    budget_plan_context: str = "",
 ) -> Tuple[str, str]:
     """Build (system_prompt, user_prompt) for ad settings guide (Step 3).
+
+    budget_plan_context: 룰 엔진(budget_planner)이 계산한 캠페인 세팅표.
+    제공되면 AI는 캠페인 구조를 임의 설계하지 않고 이 설계를 따른다.
 
     Returns a tuple so callers can pass system/user separately to the AI provider.
     """
@@ -1956,6 +1965,7 @@ def build_ad_settings_prompt(
         benefits=project.get("benefits", ""),
         strategy_context=strategy_context or "(없음)",
         content_context=content_context or "(없음)",
+        budget_plan=budget_plan_context or "(없음 — Step 1 캠페인 그룹 기반으로 직접 설계)",
     )
     return SYSTEM_GUIDE_AD_SETTINGS, prompt
 
@@ -2146,5 +2156,373 @@ def parse_wizard_proposal_sections(content: str) -> dict:
                 break
 
     return result
+
+
+# ─────────────────────── 고급 분석 (Demographic Analysis) ───────────────────────
+
+SYSTEM_GUIDE_ANALYSIS = """\
+당신은 당근 광고 운영 컨설턴트입니다. 광고주(자영업자)에게 전달할
+breakdown 분석 보고서를 작성합니다.
+
+[인사말 금지]
+- 출력 첫 줄부터 바로 본문을 시작합니다.
+- "안녕하세요", "분석해 드리겠습니다" 같은 서론 금지. 곧바로 '## 한 줄 요약'.
+
+[톤 & 수준]
+- 광고주가 1분 안에 핵심을 파악할 수 있는 쉬운 말투.
+- 전문 용어(CTR, CPC, CPA, CVR 등)는 처음 등장 시 한국어 설명을 괄호로 병기.
+  예) CTR(클릭률), CVR(클릭→행동 전환율), MAX CPA(허용 광고비 한계).
+- 존댓말 '~입니다/~됩니다' 서술체. 장황하지 않게.
+
+[당근 광고의 핵심 가정]
+1. 당근은 머신러닝이 사실상 없습니다 — 효율 나쁜 연령은 직접 꺼야 합니다.
+2. 캠페인은 연령대별로 찢어서 관리해야 OFF/증액 판단이 가능합니다.
+3. 자동/수동 캠페인은 **운영 단계별** 활용 (수동 = 안정 입찰금 탐색, 자동 = 노출 부스팅).
+   수동이 잘 돌면 자동 종료. **항상 페어 X.**
+4. 자동/수동/연령/소재가 동시에 다른 캠페인이 보이면 **비교 분석하지 말고
+   각 캠페인을 개별 진단**합니다. "변수 통제 위반"이라는 표현 절대 사용 금지.
+
+[분석 프레임워크 — 퍼널 기반 사고]
+- 퍼널: 광고노출 → 콘텐츠클릭(CTR) → 행동(채팅/단골/쿠폰, CVR)
+- 각 단계 전환율을 보고 **이탈이 가장 큰 구간**을 핵심 개선 포인트로 잡습니다.
+- 최적화 순서: **콘텐츠(소재/카피) → 캠페인(타게팅/예산) → 타겟(연령/지역) → 예산**
+- 소거(OFF) → 집중(증액) → 스케일업 사이클.
+
+[퍼널 병목별 구체 액션 — 막연한 제안 금지]
+* 노출→클릭(CTR) 병목 (CTR 0.5% 미만 또는 평균 이하 -30%):
+  - 썸네일: 0원/무료/즉시혜택을 정면에 큰 글씨로. 인물 정면 응시 + 표정.
+  - 카피 1행: 숫자/혜택/지역 조합 ("유성궁동 변색렌즈 0원 한정").
+  - 후크 형태: 질문형 / 권위형 / 시간한정형 중 하나 명확히.
+  - 시각: 배경 어둡게 + 텍스트 대비 강화. 텍스트는 화면의 30~40% 차지.
+* 클릭→행동(CVR) 병목 (CVR 5% 미만 또는 평균 이하 -30%):
+  - 소식글 본문 1번째 문단을 "혜택+조건+CTA"로 재구성.
+  - 가격 신뢰: 정가 vs 할인가 비교 + 마감일 명시.
+  - CTA: "지금 채팅 문의 → 0원 안경 받기" 식으로 다음 행동 명확히.
+  - 위치/시간 정보 본문 상단에 (영업시간, 주소, 전화).
+  - 후기/사용 사진 1장 이상 추가 (사회적 증명).
+* 행동 후 단계 (단골/쿠폰) 이탈:
+  - 단골 가입 인센티브 제시 (쿠폰 다운로드 1+1, 신규 단골 한정 등).
+  - 자동응답 메시지에 행동 유도 (방문 예약, 상담 신청).
+
+[캠페인 각각 분석 — 비교 아님]
+- 캠페인이 여러 개면 "이 캠페인 vs 저 캠페인"이 아니라, **각 캠페인 1개씩**
+  "현황 / 문제 / 액션 / 예상 효과" 4요소로 진단합니다.
+- 자동/수동이 다른 캠페인이 있어도 각자 평가. 비교/페어 언급 자제.
+
+[작성 원칙]
+- 수치를 인용해 근거 제시 (CPA, CTR, CVR, 비중%, 행동 수).
+- 추측 금지 — 입력된 데이터만 사용.
+- 막연한 제안 금지 ("개선하세요", "더 노력하세요", "검토하세요" 같은 표현 X).
+  반드시 "무엇을 / 어떻게 / 어디에" 단위로 구체화.
+- 각 액션은 "무엇 / 왜 / 어떻게 / 예상 효과" 4요소.
+
+[필수 출력 섹션]
+
+## 한 줄 요약
+1문장으로 핵심 결론 (총비용·총행동·평균CPA + 다음 액션 1개).
+
+## 현황 진단
+- 핵심 KPI 3~5개 (수치 포함, 용어 첫 등장 시 괄호 설명).
+- 최고/최악 연령 (수치 근거).
+- **각 캠페인 개별 진단**: 캠페인 1개씩 "현황·강점·약점" 한 줄씩.
+  (캠페인 비교나 "변수 통제" 같은 표현은 쓰지 마십시오.)
+- **퍼널 단계별 전환** 데이터 제공 시 — CTR·CVR 수치 + 병목 구간 한 줄.
+- **MAX CPA·손익 분석** 데이터 제공 시 — 현재 CPA가 MAX CPA의 몇 %인지 +
+  적자/손익분기/흑자 판정. 적자면 "즉시 OFF·재배분 필요" 명시.
+
+## 개선점
+1~5개 항목. 각 항목 형식:
+- **[OFF / 증액 / 소재교체 / 콘텐츠개선 / 타겟조정] 대상명**
+  - 현황: 수치
+  - 문제: 한 줄
+  - 액션: **무엇을 / 어디에 / 어떻게** 단위로 구체화 (위 [퍼널 병목별 구체 액션] 참고)
+  - 예상 효과: 수치 또는 명확한 결과
+
+## 실행 계획
+1순위~4순위. 콘텐츠 → 캠페인 → 타겟 → 예산 순서.
+1. [즉시] 무엇을 어떻게
+2. [1~3일 내] 무엇을 어떻게
+3. [1주 내] 무엇을 어떻게
+4. [모니터링] 어느 지표가 어떻게 변하면 다음 액션
+
+## 예상 효과
+- 비용 절감액 (수치)
+- 추가 전환 예상 (수치)
+- CPA 개선폭 (% 또는 원)
+- 손익 판정 변화 (적자→손익분기 등)
+
+## 소식글 카피 수정안
+(현재 운영 중인 소식글 제목/본문이 입력된 경우에만 작성. 입력이 없으면 섹션 생략.)
+
+### 제목 진단 + 후보 3개
+- 진단: 한 줄
+- 새 제목 후보 (각 30자 이내, 후크 유형 라벨 포함):
+  1. [숫자형] ...
+  2. [질문형] ...
+  3. [시간한정] ...
+
+### 본문 진단 + 완성형 수정안
+- 진단: 3~5줄 (잘된 점·약한 점 같이)
+- **수정안 1** (900~1400자, 즉시 복붙 가능):
+  ```
+  (첫 문단 = 훅 / 중반 = 혜택+신뢰요소+위치 / 마지막 = CTA 형태로 전체 본문)
+  ```
+- **수정안 2** (다른 톤 — 예: 의심해소형 vs 가성비형):
+  ```
+  ...
+  ```
+
+### 핵심 후크 문장 2~3개
+- ...
+
+## 썸네일 생성 프롬프트
+(썸네일이 첨부됐거나 소식글이 입력된 경우 작성.)
+
+### 현재 썸네일 진단 (이미지 첨부 시에만)
+- 잘된 점: ...
+- 약한 점: ...
+- 개선 방향: ...
+
+### 신규 썸네일 이미지 생성 프롬프트 (2개)
+각 프롬프트는 곧바로 Gemini / Nano Banana 등 이미지 생성기에 복붙 가능한 형태.
+한국어 또는 영문, 매우 구체적으로:
+- (a) 주제·인물·상품 (예: "30대 후반 한국 여성 안경사가 변색렌즈를 들고 정면 응시")
+- (b) 분위기·조명·색상 팔레트 (예: "따뜻한 백광, 베이지+빨강 강조색")
+- (c) 카메라·구도 (예: "정면 클로즈업, 인물 70% 화면 차지")
+- (d) 텍스트 오버레이 (예: "헤드라인 '변색렌즈 0원' 상단 중앙 굵은 산세리프, 서브 '유성궁동 한정' 하단, CTA '지금 채팅' 우하단 배지")
+- (e) 비율 1:1 정방형
+- (f) 금지 요소 (예: "스톡 느낌, 워터마크, 흐릿한 텍스트 금지")
+
+**프롬프트 1 (의심해소형):**
+```
+(전문 한 단락)
+```
+
+**프롬프트 2 (가성비/즉시혜택형):**
+```
+(전문 한 단락)
+```
+
+[민감 업종 규칙]
+의료·건강·금융·법률: 효과 단정/과장 금지. "확실히", "반드시", "최고" 같은 단정어 X.
+"""
+
+
+def build_analysis_prompt(
+    project: dict,
+    ages: list,
+    campaigns: list,
+    judgments: list,
+    plan: dict,
+    priority: list,
+    var_warnings: list,
+    pair_gaps: list,
+    extra: str = "",
+    funnel=None,
+    economics=None,
+    newspost_title: str = "",
+    newspost_text: str = "",
+    has_thumbnail: bool = False,
+) -> str:
+    """Build prompt for AI to write a 광고주-friendly demographic analysis report.
+
+    All input lists/objects are dataclass instances from app.reporting.demographic
+    (Segment, CampaignPerf, CampaignJudgment, ReallocationPlan,
+    VariableControlWarning, PairingGap). The function only reads their public
+    attributes so it stays decoupled from imports.
+    """
+    project_meta = (
+        f"- 광고주: {project.get('name', '미입력')}\n"
+        f"- 업종: {project.get('industry', '미입력')}\n"
+        f"- 지역: {project.get('region', '미입력')}\n"
+        f"- 캠페인: {project.get('campaign_name', '미입력')}"
+    )
+
+    if ages:
+        age_lines = ["연령 | 비용(원) | 행동 | 노출 | 클릭 | CPA(원) | CTR(%)",
+                     "---|---|---|---|---|---|---"]
+        for a in ages:
+            cpa_str = f"{int(a.cpa):,}" if a.actions else "-"
+            age_lines.append(
+                f"{a.label} | {a.cost:,} | {a.actions} | "
+                f"{a.impressions:,} | {a.clicks:,} | {cpa_str} | {a.ctr:.2f}"
+            )
+        age_table = "\n".join(age_lines)
+    else:
+        age_table = "(연령 데이터 없음)"
+
+    if campaigns:
+        camp_lines = ["캠페인 | 입찰 | 비용(원) | 행동 | CPA(원) | CTR(%) | 비중(%)",
+                      "---|---|---|---|---|---|---"]
+        total_cost = sum(c.cost for c in campaigns) or 1
+        for c in campaigns:
+            share = c.cost / total_cost * 100
+            cpa_str = f"{int(c.cpa):,}" if c.actions else "-"
+            camp_lines.append(
+                f"{c.name} | {c.bid_mode} | {c.cost:,} | {c.actions} | "
+                f"{cpa_str} | {c.ctr:.2f} | {share:.1f}"
+            )
+        camp_table = "\n".join(camp_lines)
+    else:
+        camp_table = "(캠페인 데이터 없음)"
+
+    if judgments:
+        verdict_lines = []
+        for j in judgments:
+            verdict_lines.append(
+                f"- {j.campaign.name} → **{j.verdict}** ({j.reason})"
+            )
+        verdict_summary = "\n".join(verdict_lines)
+    else:
+        verdict_summary = "(판정 데이터 없음)"
+
+    realloc_summary = (
+        f"- 현재 총예산: {plan.current_total:,}원\n"
+        f"- 절감 예상: {plan.savings:,}원\n"
+        f"- 추가 행동 예상: +{plan.expected_action_delta}건\n"
+        f"- 조정 후 총예산: {plan.projected_total:,}원"
+    )
+    if plan.cuts:
+        cut_lines = [f"  • {n}: -{a:,}원" for n, a in plan.cuts]
+        realloc_summary += "\n- 축소/OFF 대상:\n" + "\n".join(cut_lines)
+    if plan.boosts:
+        boost_lines = [f"  • {n}: +{a:,}원" for n, a in plan.boosts]
+        realloc_summary += "\n- 증액 대상:\n" + "\n".join(boost_lines)
+
+    priority_summary = "\n".join(f"- {p}" for p in priority) if priority else "(없음)"
+
+    # 캠페인 비교는 명시적으로 끕니다. 비교가 아닌 개별 진단.
+    var_summary = "(캠페인 비교 분석은 수행하지 않습니다. 각 캠페인을 개별 진단하세요.)"
+    pair_summary = "(자동/수동 페어 여부는 운영 의도이므로 액션화하지 않습니다.)"
+
+    funnel_block = ""
+    if funnel is not None and funnel.impressions > 0:
+        funnel_block = (
+            f"\n\n[퍼널 단계별 전환]\n"
+            f"- 노출 {funnel.impressions:,} → 클릭 {funnel.clicks:,} "
+            f"(CTR {funnel.ctr:.2f}%, 이탈 {funnel.drop_impression_to_click:.1f}%)\n"
+            f"- 클릭 {funnel.clicks:,} → 행동 {funnel.actions:,} "
+            f"(CVR {funnel.cvr:.2f}%, 이탈 {funnel.drop_click_to_action:.1f}%)\n"
+            f"- 병목 구간: {funnel.bottleneck or '판정 불가'}"
+        )
+
+    economics_block = ""
+    if economics is not None and economics.avg_order_value > 0:
+        status_text = {
+            "profit": "흑자 / 확장 여력",
+            "breakeven": "손익분기 근접",
+            "loss": "적자 / 즉시 조정 필요",
+        }.get(economics.status, "판단 보류")
+        economics_block = (
+            f"\n\n[MAX CPA · 손익 분석]\n"
+            f"- 객단가: {economics.avg_order_value:,}원\n"
+            f"- 목표 이익률: {economics.target_margin_rate*100:.0f}%\n"
+            f"- 현재 CPA: {economics.current_cpa:,.0f}원\n"
+            f"- 손익분기 CPA: {economics.breakeven_cpa:,.0f}원\n"
+            f"- MAX CPA (목표 이익 반영): {economics.max_cpa:,.0f}원\n"
+            f"- 한계 소진율: {economics.burn_rate*100:.1f}%\n"
+            f"- 판정: {status_text}\n"
+            f"- 예상 매출: {economics.expected_revenue:,}원 / "
+            f"광고 후 이익: {economics.expected_profit:,}원"
+        )
+
+    newspost_block = ""
+    if newspost_title.strip() or newspost_text.strip():
+        title_part = newspost_title.strip() or "(제목 미입력)"
+        body_part = newspost_text.strip() or "(본문 미입력)"
+        newspost_block = (
+            "\n\n[현재 운영 중인 소식글 — 진단 + 완성형 수정안 작성]\n"
+            f"## 제목\n{title_part}\n\n"
+            f"## 본문\n{body_part}\n\n"
+            "위를 분석한 뒤, 시스템 가이드의 [소식글 카피 수정안] 섹션에 "
+            "다음을 모두 작성하세요:\n"
+            "1) 제목 진단 한 줄 + **새 제목 후보 3개** (각 30자 이내, "
+            "후크 유형 명시: [숫자형/질문형/시간한정/권위형 등])\n"
+            "2) 본문 진단 3~5줄 + **완성형 본문 수정안 1~2개** (각 900~1400자, "
+            "첫 문단=훅, 중반=혜택+신뢰요소+위치, 마지막=CTA, 즉시 복붙 가능한 형태)\n"
+            "3) 본문 안에 들어갈 핵심 후크 문장 2~3개"
+        )
+
+    thumbnail_block = ""
+    if has_thumbnail:
+        thumbnail_block = (
+            "\n\n[썸네일 직접 분석 + 이미지 생성 프롬프트 작성]\n"
+            "user 메시지에 현재 광고 썸네일이 이미지로 첨부되어 있습니다. "
+            "실제 보이는 시각 요소(색상·인물·문구 위치/크기·배경·여백)를 평가하고, "
+            "시스템 가이드의 [썸네일 생성 프롬프트] 섹션에 다음을 모두 작성하세요:\n"
+            "1) 현재 썸네일 잘된 점 1~2개 (실제 보이는 요소 기준)\n"
+            "2) 약한 점 2~3개 (실제 보이는 요소 기준)\n"
+            "3) 구체 개선 방향 3~5개 (색상값·문구·배치)\n"
+            "4) **이미지 생성 프롬프트 2개** — 곧바로 Gemini/Nano Banana 등 이미지 "
+            "생성기에 복붙 가능한 영문 또는 한국어 자세한 프롬프트. 각 프롬프트는 "
+            "(a) 주제·인물·상품, (b) 분위기·조명·색상 팔레트, (c) 카메라/구도, "
+            "(d) 텍스트 오버레이(헤드라인·서브·CTA·가격) 위치와 크기, "
+            "(e) 비율(1:1 정방형 권장), (f) 금지 요소를 포함합니다."
+        )
+    elif newspost_title.strip() or newspost_text.strip():
+        # 썸네일이 없어도, 소식글이 입력되었다면 신규 썸네일 프롬프트는 만들어 줍니다.
+        thumbnail_block = (
+            "\n\n[썸네일 생성 프롬프트만 작성 — 첨부 이미지는 없음]\n"
+            "현재 썸네일 이미지는 첨부되지 않았으니 진단 없이, "
+            "소식글 제목·본문 톤에 맞는 신규 썸네일 생성 프롬프트 2개를 "
+            "시스템 가이드의 [썸네일 생성 프롬프트] 섹션에 작성하세요. "
+            "각 프롬프트는 (a) 주제·인물·상품, (b) 분위기·조명·색상, "
+            "(c) 카메라/구도, (d) 텍스트 오버레이 위치·크기, (e) 1:1 비율, "
+            "(f) 금지 요소를 포함합니다."
+        )
+
+    extra_block = f"\n\n[추가 요청]\n{extra.strip()}" if extra.strip() else ""
+
+    return (
+        f"[광고주 정보]\n{project_meta}\n\n"
+        f"[연령대 breakdown]\n{age_table}\n\n"
+        f"[캠페인 breakdown — 각 캠페인을 개별 진단하세요. 비교/페어 언급 금지]\n{camp_table}\n\n"
+        f"[규칙 기반 캠페인 판정]\n{verdict_summary}\n\n"
+        f"[예산 재배분 시뮬레이션]\n{realloc_summary}\n\n"
+        f"[운영 우선순위 자동 도출]\n{priority_summary}"
+        f"{funnel_block}"
+        f"{economics_block}"
+        f"{newspost_block}"
+        f"{thumbnail_block}"
+        f"{extra_block}\n\n"
+        f"[작성 규칙 — 반드시 준수]\n"
+        f"1) 캠페인을 1개씩 개별 진단합니다. '비교'·'변수 통제'·'페어 누락' 같은 표현은 절대 쓰지 마세요.\n"
+        f"2) 막연한 제안('개선하세요','검토하세요','신경 쓰세요') 금지. 반드시 '무엇을 / 어디에 / 어떻게'를 명시합니다.\n"
+        f"3) 퍼널 병목 데이터가 있으면 시스템 가이드의 [퍼널 병목별 구체 액션]을 그대로 인용해 액션을 만듭니다.\n"
+        f"4) MAX CPA 데이터가 있으면 적자/손익분기/흑자 판정과 그 근거를 한 줄로 명시합니다.\n"
+        f"5) 수치 인용은 위 표에서만 가져오고 추측 금지."
+    )
+
+
+def parse_analysis_sections(content: str) -> dict:
+    """Split analysis content into 6 named sections by '## ' headers.
+
+    Returns dict with keys: summary, status, findings, plan, expected, client_note, raw.
+    Missing sections become empty strings.
+    """
+    keys_map = [
+        ("한 줄 요약", "summary"),
+        ("현황 진단", "status"),
+        ("개선점", "findings"),
+        ("실행 계획", "plan"),
+        ("예상 효과", "expected"),
+        ("광고주 전달 멘트", "client_note"),
+        ("소식글 카피 수정안", "copy_revisions"),
+        ("썸네일 생성 프롬프트", "thumbnail_prompts"),
+    ]
+    out = {v: "" for _, v in keys_map}
+    out["raw"] = content
+
+    parts = _re.split(r"(?m)^(## .+)", content)
+    for i, part in enumerate(parts):
+        if not part.startswith("## "):
+            continue
+        body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+        header = part[3:].strip()
+        for keyword, key in keys_map:
+            if keyword in header and not out[key]:
+                out[key] = body
+                break
+    return out
 
 

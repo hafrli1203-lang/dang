@@ -143,7 +143,7 @@ def planning_page() -> None:
 
         # Page header
         ui.label("광고 기획").classes("dg-page-title")
-        ui.label("AI로 소식글 콘텐츠와 운영 제안서를 자동 생성합니다.").classes("dg-page-subtitle")
+        ui.label("AI가 소식글 콘텐츠부터 운영 제안서까지 만들어 드려요.").classes("dg-page-subtitle")
 
         # -- Project selector --
         with ui.card().classes("dg-card w-full"):
@@ -178,7 +178,8 @@ def planning_page() -> None:
                     if _wizard_reset_ref["fn"]:
                         _wizard_reset_ref["fn"]()
 
-                project_sel.on("update:model-value", on_project_change)
+                # GenericEventArguments에는 e.value가 없어 on_value_change를 써야 한다.
+                project_sel.on_value_change(on_project_change)
 
         # -- Project info banner --
         project_banner = ui.element("div").classes("dg-banner dg-banner-info w-full hidden")
@@ -231,7 +232,7 @@ def planning_page() -> None:
                     def _on_category_change(e) -> None:
                         strategy_sel.set_visibility(e.value == "restaurant")
 
-                    category_sel.on("update:model-value", _on_category_change)
+                    category_sel.on_value_change(_on_category_change)
 
                 with ui.column().classes("flex-1 gap-1"):
                     ui.label("추가 요청 사항 (선택)").classes("dg-label-sm")
@@ -247,8 +248,8 @@ def planning_page() -> None:
                 with ui.element("div").classes("dg-banner dg-banner-info w-full"):
                     ui.icon("info", size="18px")
                     ui.label(
-                        "AI에게 전달되는 시스템 지침을 직접 편집할 수 있습니다. "
-                        "수정 후 '저장'을 누르면 다음 생성부터 적용됩니다."
+                        "AI에게 전달되는 시스템 지침을 직접 고칠 수 있어요. "
+                        "'저장'을 누르면 다음 생성부터 적용돼요."
                     )
                 _custom_prompt = get_setting("custom_system_prompt")
                 prompt_editor = ui.textarea(
@@ -262,16 +263,16 @@ def planning_page() -> None:
                         val = prompt_editor.value.strip()
                         if val:
                             save_setting("custom_system_prompt", val)
-                            _prompt_modified.set_text("저장 완료!")
+                            _prompt_modified.set_text("저장했어요!")
                             _prompt_modified.classes(remove="hidden")
-                            ui.notify("시스템 프롬프트가 저장되었습니다.", type="positive")
+                            ui.notify("시스템 프롬프트를 저장했어요. 다음 생성부터 적용돼요.", type="positive")
 
                     def _reset_prompt() -> None:
                         delete_setting("custom_system_prompt")
                         prompt_editor.set_value(SYSTEM_GUIDE_PLANNING)
-                        _prompt_modified.set_text("기본값으로 초기화됨")
+                        _prompt_modified.set_text("기본값으로 되돌렸어요")
                         _prompt_modified.classes(remove="hidden")
-                        ui.notify("기본 시스템 프롬프트로 초기화되었습니다.", type="info")
+                        ui.notify("기본 시스템 프롬프트로 되돌렸어요.", type="info")
 
                     ui.button("저장", icon="save", on_click=_save_prompt).classes("dg-btn-primary dg-btn-sm")
                     ui.button("기본값으로 초기화", icon="restart_alt", on_click=_reset_prompt).classes("dg-btn-secondary dg-btn-sm")

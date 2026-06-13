@@ -30,12 +30,22 @@ async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
     return await ExportManager.save_as_multi(pairs)
 
 
-NAV_PAGES = [
-    ("folder_open", "프로젝트 관리", "/"),
-    ("edit_note", "광고 기획", "/planning"),
-    ("assessment", "성과 보고서", "/report"),
-    ("insights", "고급 분석", "/analysis"),
+NAV_SECTIONS = [
+    ("제작", [
+        ("folder_open", "프로젝트 관리", "/"),
+        ("edit_note", "광고 기획", "/planning"),
+        ("image", "썸네일 제작", "/thumbnail"),
+    ]),
+    ("분석", [
+        ("assessment", "성과 보고서", "/report"),
+        ("insights", "고급 분석", "/analysis"),
+    ]),
 ]
+
+# 하위 호환 (다른 모듈에서 참조할 수 있음)
+NAV_PAGES = [item for _, items in NAV_SECTIONS for item in items]
+
+_PAGE_TITLES = {path: name for _, items in NAV_SECTIONS for _icon, name, path in items}
 
 
 def create_nav(current: str) -> None:
@@ -43,44 +53,57 @@ def create_nav(current: str) -> None:
 
     # -- Header --
     with ui.header().classes("dg-header"):
-        with ui.row().classes("w-full items-center px-4 h-full"):
+        with ui.row().classes("w-full items-center px-4 h-full gap-1"):
             ui.button(
                 icon="menu",
                 on_click=lambda: drawer.toggle(),
             ).props("flat round dense").style("color: var(--dg-text-secondary)")
-            ui.label("당근 광고 도우미").classes("dg-logo ml-2")
+            ui.label("당근 광고 도우미").classes("dg-logo ml-1")
+            if current in _PAGE_TITLES:
+                ui.icon("chevron_right", size="16px").style("color: var(--dg-text-caption)")
+                ui.label(_PAGE_TITLES[current]).style(
+                    "font-size: 13px; font-weight: 600; color: var(--dg-text-secondary)"
+                )
             ui.space()
             ui.label(f"v{_get_version()}").classes("dg-header-version")
 
     # -- Sidebar --
     drawer = ui.left_drawer(value=True, fixed=True, bordered=False).classes("dg-sidebar")
     with drawer:
-        # Logo block
-        with ui.column().classes("px-5 pt-2 pb-4"):
-            with ui.row().classes("items-center gap-3"):
-                ui.icon("storefront", size="28px").style("color: var(--dg-primary)")
-                with ui.column().classes("gap-0"):
-                    ui.label("당근 광고").style(
-                        "font-size: 15px; font-weight: 700; color: var(--dg-text-primary)"
-                    )
-                    ui.label("기획 도우미").style(
-                        "font-size: 12px; color: var(--dg-text-caption)"
-                    )
-        ui.separator().style("border-color: var(--dg-border-light); margin: 0 16px")
+        # Workspace header (management 패턴: 로고 칩 + 이름, border-b)
+        with ui.element("div").classes("dg-workspace-header w-full"):
+            with ui.element("div").style(
+                "width: 34px; height: 34px; border-radius: 10px;"
+                "background: linear-gradient(135deg, #FF8A30 0%, #FF6F0F 100%);"
+                "display: flex; align-items: center; justify-content: center;"
+                "box-shadow: 0 2px 6px rgba(255,111,15,0.3); flex-shrink: 0"
+            ):
+                ui.icon("storefront", size="20px").style("color: white")
+            ui.label("당근 광고 도우미").style(
+                "font-size: 15px; font-weight: 800; letter-spacing: -0.4px;"
+                "color: var(--dg-text-primary)"
+            )
 
-        # Section label
-        ui.label("메뉴").classes("dg-nav-section-label")
-
-        # Nav items
-        for icon, name, path in NAV_PAGES:
-            active = current == path
-            ui.button(
-                name,
-                icon=icon,
-                on_click=lambda p=path: ui.navigate.to(p),
-            ).classes(
-                "dg-nav-item" + (" active" if active else "")
-            ).props("flat no-caps align=left")
+        # Nav sections (구분선만)
+        for section_idx, (_section_label, items) in enumerate(NAV_SECTIONS):
+            if section_idx > 0:
+                ui.separator().style(
+                    "border-color: var(--dg-border); margin: 10px 18px"
+                )
+            else:
+                ui.element("div").style("height: 10px")
+            for icon, name, path in items:
+                active = current == path
+                # color=None: Quasar의 text-primary(!important) 강제 적용을 막아
+                # 비활성 메뉴가 오렌지로 보이지 않게 한다.
+                ui.button(
+                    name,
+                    icon=icon,
+                    color=None,
+                    on_click=lambda p=path: ui.navigate.to(p),
+                ).classes(
+                    "dg-nav-item" + (" active" if active else "")
+                ).props("flat no-caps align=left")
 
         # Spacer + footer
         ui.space()
@@ -111,7 +134,7 @@ def create_log_panel() -> None:
 
         def _refresh() -> None:
             entries = get_recent_logs(50)
-            log_area.value = "\n".join(entries) if entries else "(로그 없음 -- AI 생성을 실행하면 로그가 표시됩니다)"
+            log_area.value = "\n".join(entries) if entries else "아직 로그가 없어요. AI 생성을 실행하면 여기에 표시돼요."
 
         with ui.row().classes("gap-2 items-center mt-1"):
             ui.button("새로고침", icon="refresh", on_click=_refresh).classes("dg-btn-secondary dg-btn-sm")

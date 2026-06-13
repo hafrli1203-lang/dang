@@ -50,3 +50,7 @@ app.log
 # OS
 Thumbs.db
 .DS_Store
+
+# Tool artifacts
+.code-review-graph/
+*.log

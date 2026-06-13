@@ -458,13 +458,35 @@ class TestGeminiImageGeneration(unittest.TestCase):
 class TestGetProvider(unittest.TestCase):
     """Tests for the get_provider factory function."""
 
-    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key"})
+    @patch.dict(os.environ, {"CLAUDE_BACKEND": "cli"}, clear=False)
+    def test_returns_claude_cli_provider_by_default(self):
+        """get_provider('claude') uses CLI by default (no API key needed)."""
+        from app.ai.providers import get_provider, ClaudeCliProvider
+        provider = get_provider("claude")
+        self.assertIsInstance(provider, ClaudeCliProvider)
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key", "CLAUDE_BACKEND": "api"})
     @patch("anthropic.Anthropic")
-    def test_returns_claude_provider(self, mock_cls):
-        """get_provider('claude') should return ClaudeProvider."""
+    def test_returns_claude_api_provider_when_backend_set(self, mock_cls):
+        """CLAUDE_BACKEND=api forces the legacy ClaudeProvider path."""
         mock_cls.return_value = MagicMock()
         from app.ai.providers import get_provider, ClaudeProvider
         provider = get_provider("claude")
+        self.assertIsInstance(provider, ClaudeProvider)
+
+    def test_returns_claude_cli_provider_explicit(self):
+        """Explicit 'claude-cli' returns ClaudeCliProvider regardless of env."""
+        from app.ai.providers import get_provider, ClaudeCliProvider
+        provider = get_provider("claude-cli")
+        self.assertIsInstance(provider, ClaudeCliProvider)
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "key"})
+    @patch("anthropic.Anthropic")
+    def test_returns_claude_api_provider_explicit(self, mock_cls):
+        """Explicit 'claude-api' returns ClaudeProvider regardless of env."""
+        mock_cls.return_value = MagicMock()
+        from app.ai.providers import get_provider, ClaudeProvider
+        provider = get_provider("claude-api")
         self.assertIsInstance(provider, ClaudeProvider)
 
     @unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")

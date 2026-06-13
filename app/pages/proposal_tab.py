@@ -55,16 +55,16 @@ def build_proposal_tab() -> None:  # noqa: C901
             with ui.row().classes("items-center gap-3"):
                 ui.icon("info", size="24px").style("color: var(--dg-primary)")
                 with ui.column().classes("gap-1"):
-                    ui.label("소식글 기획 탭의 Step 4에서 통합 운영 제안서를 생성할 수 있습니다.").style(
+                    ui.label("소식글 기획 탭의 Step 4에서 통합 운영 제안서를 만들 수 있어요.").style(
                         "font-weight: 600; font-size: 14px; color: var(--dg-text-primary)"
                     )
                     ui.label(
-                        "4단계 위자드(전략 분석 > 콘텐츠 생성 > 광고 세팅 > 운영 제안서)를 통해 "
-                        "더욱 종합적인 제안서를 생성할 수 있습니다."
+                        "4단계 위자드(전략 분석 > 콘텐츠 생성 > 광고 세팅 > 운영 제안서)를 거치면 "
+                        "더 종합적인 제안서를 받아볼 수 있어요."
                     ).classes("dg-label-sm")
 
         section_header("description", "광고 운영 제안서 생성기 (독립 모드)",
-                       "7섹션 구조의 전문 광고 운영 제안서를 AI로 자동 생성합니다.")
+                       "AI가 7개 섹션으로 구성된 광고 운영 제안서를 만들어 드려요.")
 
         # -- Input form --
         with ui.card().classes("dg-card w-full"):
@@ -99,7 +99,7 @@ def build_proposal_tab() -> None:  # noqa: C901
             ).classes("w-48 dg-select")
 
         with ui.card().classes("dg-card w-full"):
-            section_header("analytics", "이전 캠페인 성과", "CSV 파일을 업로드하면 자동으로 KPI를 계산합니다.")
+            section_header("analytics", "이전 캠페인 성과", "CSV 파일을 올리면 KPI를 자동으로 계산해 드려요.")
 
             csv_status = ui.label("").classes("dg-text-sm")
 
@@ -112,11 +112,11 @@ def build_proposal_tab() -> None:  # noqa: C901
                 _state["csv_warnings"] = warnings
                 if rows:
                     _state["kpi"] = calc_kpi(rows)
-                    csv_status.set_text(f"CSV 파싱 완료: {len(rows)}행 ({len(warnings)}건 경고)")
+                    csv_status.set_text(f"CSV를 읽었어요: {len(rows)}행 (경고 {len(warnings)}건)")
                     csv_status.style("color: var(--dg-success)")
                     manual_summary.set_visibility(False)
                 else:
-                    csv_status.set_text(f"CSV 파싱 실패: {'; '.join(warnings)}")
+                    csv_status.set_text(f"CSV를 읽지 못했어요. 파일 양식을 확인해 주세요. ({'; '.join(warnings)})")
                     csv_status.style("color: var(--dg-error)")
 
             ui.upload(
@@ -195,14 +195,14 @@ def build_proposal_tab() -> None:  # noqa: C901
             }
 
             if not shop_info["shop_name"]:
-                ui.notify("점포명을 입력해주세요.", type="warning")
+                ui.notify("점포명을 입력해 주세요.", type="warning")
                 _state["generating"] = False
                 return
 
             engine = engine_radio.value
             spinner.classes(remove="hidden")
             gen_btn.props("disabled")
-            progress_label.set_text("프롬프트 생성 중...")
+            progress_label.set_text("제안서 작성을 준비하고 있어요...")
 
             try:
                 news_post = ""
@@ -230,7 +230,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                 content = ""
 
                 if engine == "both":
-                    progress_label.set_text("Claude + Gemini 동시 호출 중...")
+                    progress_label.set_text("Claude와 Gemini가 동시에 작성하고 있어요...")
                     claude_p = ClaudeProvider()
                     gemini_p = GeminiProvider()
                     c_text, g_text = await asyncio.gather(
@@ -246,7 +246,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                         f"---\n\n## [Gemini 결과]\n\n{g_text}"
                     )
                 else:
-                    progress_label.set_text(f"{engine.capitalize()} 스트리밍 중...")
+                    progress_label.set_text(f"{engine.capitalize()}가 제안서를 작성하고 있어요...")
                     provider = get_provider(engine)
                     chunk_queue: queue.Queue[str | None] = queue.Queue()
                     accumulated = ""
@@ -285,7 +285,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                                 new_count = accumulated.count("\n## ")
                                 if new_count > section_count:
                                     section_count = new_count
-                                    progress_label.set_text(f"섹션 {min(section_count, 7)}/7 생성 중...")
+                                    progress_label.set_text(f"섹션 {min(section_count, 7)}/7을 작성하고 있어요...")
                                 stream_md.set_content(accumulated)
                         except Exception as poll_exc:
                             _log.warning("스트리밍 폴링 오류: %s", poll_exc)
@@ -296,7 +296,7 @@ def build_proposal_tab() -> None:  # noqa: C901
 
                     stream_md.delete()
 
-                progress_label.set_text("섹션 파싱 중...")
+                progress_label.set_text("섹션을 정리하고 있어요...")
                 _state["raw_content"] = content
                 _state["sections"] = parse_proposal_sections(content)
 
@@ -305,13 +305,13 @@ def build_proposal_tab() -> None:  # noqa: C901
                     save_generated_content(pid, engine, content, content_type="proposal")
 
                 _render_sections_now()
-                progress_label.set_text("생성 완료!")
-                ui.notify("제안서가 생성되었습니다.", type="positive")
+                progress_label.set_text("제안서가 완성됐어요!")
+                ui.notify("제안서를 만들었어요. 아래에서 내용을 확인해 보세요.", type="positive")
 
             except Exception as exc:
                 _log.exception("제안서 생성 실패")
-                ui.notify(f"생성 실패: {exc}", type="negative", timeout=8000)
-                progress_label.set_text(f"오류: {exc}")
+                ui.notify(f"제안서를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
+                progress_label.set_text("제안서를 만들지 못했어요. 다시 시도해 주세요.")
             finally:
                 spinner.classes("hidden", remove=False)
                 gen_btn.props(remove="disabled")
@@ -330,7 +330,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                 "location": location_input.value or "",
             }
 
-            progress_label.set_text(f"'{_PROPOSAL_SECTION_NAMES[section_key]}' 재생성 중...")
+            progress_label.set_text(f"'{_PROPOSAL_SECTION_NAMES[section_key]}' 섹션을 다시 쓰고 있어요...")
             spinner.classes(remove="hidden")
 
             try:
@@ -375,13 +375,13 @@ def build_proposal_tab() -> None:  # noqa: C901
                     save_generated_content(pid, engine, _state["raw_content"], content_type="proposal")
 
                 _render_sections_now()
-                progress_label.set_text("재생성 완료!")
-                ui.notify(f"'{_PROPOSAL_SECTION_NAMES[section_key]}' 섹션이 재생성되었습니다.", type="positive")
+                progress_label.set_text("다시 만들었어요!")
+                ui.notify(f"'{_PROPOSAL_SECTION_NAMES[section_key]}' 섹션을 다시 만들었어요.", type="positive")
 
             except Exception as exc:
                 _log.exception("섹션 재생성 실패")
-                ui.notify(f"재생성 실패: {exc}", type="negative", timeout=8000)
-                progress_label.set_text(f"오류: {exc}")
+                ui.notify(f"섹션을 다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
+                progress_label.set_text("섹션을 다시 만들지 못했어요. 다시 시도해 주세요.")
             finally:
                 spinner.classes("hidden", remove=False)
 
@@ -389,7 +389,7 @@ def build_proposal_tab() -> None:  # noqa: C901
 
         async def _export_default() -> None:
             if not _state["raw_content"]:
-                ui.notify("먼저 제안서를 생성해주세요.", type="warning")
+                ui.notify("저장할 제안서가 아직 없어요. 먼저 제안서를 만들어 주세요.", type="warning")
                 return
             try:
                 shop_info = {
@@ -412,13 +412,13 @@ def build_proposal_tab() -> None:  # noqa: C901
                     docx_bytes = tmp_path.read_bytes()
 
                 ExportManager.save_default(docx_bytes, filename)
-                ui.notify(f"'{filename}' 저장 완료", type="positive")
+                ui.notify(f"저장했어요: {filename}", type="positive")
             except Exception as exc:
-                ui.notify(f"저장 실패: {exc}", type="negative")
+                ui.notify(f"저장하지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
         async def _export_saveas() -> None:
             if not _state["raw_content"]:
-                ui.notify("먼저 제안서를 생성해주세요.", type="warning")
+                ui.notify("저장할 제안서가 아직 없어요. 먼저 제안서를 만들어 주세요.", type="warning")
                 return
             try:
                 shop_info = {
@@ -442,7 +442,7 @@ def build_proposal_tab() -> None:  # noqa: C901
 
                 await ExportManager.save_as(docx_bytes, filename)
             except Exception as exc:
-                ui.notify(f"저장 실패: {exc}", type="negative")
+                ui.notify(f"저장하지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
         export_default_btn.on_click(_export_default)
         export_saveas_btn.on_click(_export_saveas)
@@ -473,7 +473,7 @@ def _render_sections(
         for idx, key in enumerate(_PROPOSAL_SECTION_KEYS):
             section_name = _PROPOSAL_SECTION_NAMES[key]
             section_num = idx + 1
-            body = state["sections"].get(key, "(내용 없음)")
+            body = state["sections"].get(key, "(아직 내용이 없어요)")
 
             with ui.expansion(
                 f"{section_num}. {section_name}",
@@ -517,7 +517,7 @@ def _render_sections(
                         p_id = nicegui_app.storage.user.get("current_project_id")
                         if p_id:
                             save_generated_content(p_id, "edited", state["raw_content"], content_type="proposal")
-                        ui.notify("편집 저장 완료", type="positive")
+                        ui.notify("수정한 내용을 저장했어요.", type="positive")
 
                     edit_btn.on_click(_toggle_edit)
                     save_btn.on_click(_save_edit)

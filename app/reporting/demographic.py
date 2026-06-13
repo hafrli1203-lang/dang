@@ -349,18 +349,31 @@ def judge_campaigns(
 # ───────────────────────── budget reallocation ─────────────────────────
 
 
-def simulate_reallocation(judgments: Sequence[CampaignJudgment]) -> ReallocationPlan:
-    """Build a reallocation plan based on judgments.
+def simulate_reallocation(
+    judgments: Sequence[CampaignJudgment],
+    ages: Sequence[Segment] | None = None,
+    *,
+    age_off_cpa_multiplier: float = 2.0,
+    age_boost_cpa_multiplier: float = 0.7,
+) -> ReallocationPlan:
+    """Build a reallocation plan based on judgments and optional age breakdown.
 
-    OFF: remove entire cost from budget.
-    소재전면교체: cut 50% while testing new creatives.
-    증액: double the budget (capped by total saved).
-    Expected action delta is estimated with each boosted campaign's current CPA.
+    Campaign-level rules:
+      OFF: remove entire cost from budget.
+      소재전면교체: cut 50% while testing new creatives.
+      증액: double the budget (capped by total saved).
+
+    Age-level rules (when `ages` provided — entries prefixed with "[연령]"):
+      cost > 0 and actions == 0 → OFF (full age cost)
+      cpa > avg × age_off_cpa_multiplier and actions < avg actions → OFF
+      cpa < avg × age_boost_cpa_multiplier and actions > avg actions → 증액
+
+    Expected action delta is estimated with each boosted unit's current CPA.
     """
     current_total = sum(j.campaign.cost for j in judgments)
 
     cuts: list[tuple[str, int]] = []
-    boost_candidates: list[tuple[CampaignJudgment, int]] = []  # (judgment, desired_boost)
+    boost_candidates: list[tuple[str, float, int]] = []  # (label, cpa, desired_boost)
 
     for j in judgments:
         if j.verdict == "캠페인OFF":
@@ -368,21 +381,47 @@ def simulate_reallocation(judgments: Sequence[CampaignJudgment]) -> Reallocation
         elif j.verdict == "소재전면교체":
             cuts.append((j.campaign.name, j.campaign.cost // 2))
         elif j.verdict == "증액":
-            boost_candidates.append((j, j.campaign.cost))  # double = +current
+            boost_candidates.append((j.campaign.name, j.campaign.cpa, j.campaign.cost))
+
+    if ages:
+        active = [a for a in ages if a.actions > 0]
+        avg_cpa = (
+            sum(a.cost for a in active) / sum(a.actions for a in active)
+            if active and sum(a.actions for a in active) > 0
+            else 0.0
+        )
+        avg_actions = sum(a.actions for a in active) / len(active) if active else 0.0
+        for a in ages:
+            if a.cost <= 0:
+                continue
+            if a.actions == 0:
+                cuts.append((f"[연령] {a.label}", a.cost))
+            elif (
+                avg_cpa > 0
+                and a.cpa > avg_cpa * age_off_cpa_multiplier
+                and a.actions < avg_actions
+            ):
+                cuts.append((f"[연령] {a.label}", a.cost))
+            elif (
+                avg_cpa > 0
+                and a.cpa < avg_cpa * age_boost_cpa_multiplier
+                and a.actions > avg_actions
+            ):
+                boost_candidates.append((f"[연령] {a.label}", a.cpa, a.cost))
 
     total_savings = sum(amt for _, amt in cuts)
-    total_boost_desired = sum(amt for _, amt in boost_candidates)
+    total_boost_desired = sum(d for _, _, d in boost_candidates)
 
     boosts: list[tuple[str, int]] = []
     expected_delta = 0
 
     if total_boost_desired > 0 and total_savings > 0:
         ratio = min(1.0, total_savings / total_boost_desired)
-        for j, desired in boost_candidates:
+        for name, cpa, desired in boost_candidates:
             applied = int(desired * ratio)
-            boosts.append((j.campaign.name, applied))
-            if j.campaign.cpa > 0:
-                expected_delta += int(applied / j.campaign.cpa)
+            boosts.append((name, applied))
+            if cpa > 0:
+                expected_delta += int(applied / cpa)
 
     projected_total = current_total - total_savings + sum(amt for _, amt in boosts)
 
@@ -401,11 +440,15 @@ def simulate_reallocation(judgments: Sequence[CampaignJudgment]) -> Reallocation
 
 def build_priority_checklist(
     judgments: Sequence[CampaignJudgment],
+    ages: Sequence[Segment] | None = None,
+    *,
+    age_off_cpa_multiplier: float = 2.0,
+    age_boost_cpa_multiplier: float = 0.7,
 ) -> list[str]:
-    """Deterministic execution order aligned with the reference image.
+    """Deterministic execution order.
 
-    1순위: 비효율 캠페인 축소/OFF
-    2순위: 고효율 캠페인 증액
+    1순위: 비효율(캠페인/연령) 축소/OFF
+    2순위: 고효율(캠페인/연령) 증액
     3순위: 소재 정리 및 A/B 테스트
     4순위: 신규 소재/타겟 테스트
     """
@@ -414,11 +457,41 @@ def build_priority_checklist(
     replace = [j.campaign.name for j in judgments if j.verdict == "소재전면교체"]
     keep = [j.campaign.name for j in judgments if j.verdict == "소재정리후유지"]
 
+    age_off: list[str] = []
+    age_boost: list[str] = []
+    if ages:
+        active = [a for a in ages if a.actions > 0]
+        avg_cpa = (
+            sum(a.cost for a in active) / sum(a.actions for a in active)
+            if active and sum(a.actions for a in active) > 0
+            else 0.0
+        )
+        avg_actions = sum(a.actions for a in active) / len(active) if active else 0.0
+        for a in ages:
+            if a.cost <= 0:
+                continue
+            if a.actions == 0:
+                age_off.append(a.label)
+            elif (
+                avg_cpa > 0
+                and a.cpa > avg_cpa * age_off_cpa_multiplier
+                and a.actions < avg_actions
+            ):
+                age_off.append(a.label)
+            elif (
+                avg_cpa > 0
+                and a.cpa < avg_cpa * age_boost_cpa_multiplier
+                and a.actions > avg_actions
+            ):
+                age_boost.append(a.label)
+
     items: list[str] = []
-    if off:
-        items.append(f"1순위 — 비효율 캠페인 축소/OFF: {', '.join(off)}")
-    if boost:
-        items.append(f"2순위 — 고효율 캠페인 예산 확대: {', '.join(boost)}")
+    off_labels = [f"캠페인 {n}" for n in off] + [f"연령 {n}" for n in age_off]
+    if off_labels:
+        items.append(f"1순위 — 비효율 축소/OFF: {', '.join(off_labels)}")
+    boost_labels = [f"캠페인 {n}" for n in boost] + [f"연령 {n}" for n in age_boost]
+    if boost_labels:
+        items.append(f"2순위 — 고효율 예산 확대: {', '.join(boost_labels)}")
     if replace or keep:
         targets = replace + keep
         items.append(f"3순위 — 소재 정리 및 A/B 테스트: {', '.join(targets)}")
@@ -499,13 +572,20 @@ def check_auto_manual_pairing(
 def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[CampaignPerf]]:
     """Parse a 당근 광고 관리자 내보내기 xlsx.
 
-    Auto-detects sheets by header row:
-    - Sheet with '성별' column → gender segments
-    - Sheet with '연령' or '연령대' column → age segments
-    - Sheet with '캠페인' column → campaigns
+    Supports two layouts:
+
+    1. **Pre-aggregated per-sheet** (legacy/template format):
+       - Sheet with '성별' column → gender segments
+       - Sheet with '연령' or '연령대' column → age segments
+       - Sheet with '캠페인' column → campaigns
+
+    2. **Long-format breakdown** (당근 광고관리자 직접 내보내기):
+       - Single sheet with rows = (기간 × 캠페인 × 연령) cross-tab.
+       - Aggregated into age segments + campaign rows.
+       - Bid mode parsed from campaign-name suffix (`_수동` / `_자동`).
 
     Returns a dict with keys "genders", "ages", "campaigns".
-    Missing sheets return empty lists.
+    Missing dimensions return empty lists.
     """
     import io
 
@@ -514,6 +594,8 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
 
     result: dict[str, list] = {"genders": [], "ages": [], "campaigns": []}
+    period_first: str | None = None
+    period_last: str | None = None
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -525,6 +607,19 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
         if header_idx < 0:
             continue
         header = [str(c or "").strip() for c in rows[header_idx]]
+
+        # Try breakdown format first (single-sheet long-format)
+        if _is_breakdown_format(header):
+            ages, campaigns, p_first, p_last = _aggregate_breakdown(
+                header, rows[header_idx + 1 :]
+            )
+            result["ages"].extend(ages)
+            result["campaigns"].extend(campaigns)
+            if p_first and (period_first is None or p_first < period_first):
+                period_first = p_first
+            if p_last and (period_last is None or p_last > period_last):
+                period_last = p_last
+            continue
 
         kind = _detect_sheet_kind(header)
         if not kind:
@@ -579,6 +674,11 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
                 )
                 result["genders" if kind == "gender" else "ages"].append(seg)
 
+    result["meta"] = {
+        "period_first": period_first or "",
+        "period_last": period_last or "",
+        "campaign_names": [c.name for c in result["campaigns"]],
+    }
     return result
 
 
@@ -676,3 +776,331 @@ def _cell_str(row: tuple, idx: int | None) -> str:
         return ""
     v = row[idx]
     return "" if v is None else str(v).strip()
+
+
+# ───────────────────── long-format breakdown parser ─────────────────────
+
+# Action columns: any of these contribute to "총행동" when summed per row.
+# Source: 당근 광고관리자 직접 내보내기 (기간×캠페인×연령 breakdown).
+_ACTION_KEYWORDS = (
+    "단골", "후기", "쿠폰", "관심", "댓글",
+    "전화 문의", "채팅 문의", "포장 주문", "리드폼 잠재고객",
+)
+
+
+def _is_breakdown_format(header: list[str]) -> bool:
+    """Detect 당근 광고관리자 직접 내보내기 (long-format) layout.
+
+    Signature: header contains 캠페인 + 연령 + 비용 columns simultaneously, which
+    only happens in the breakdown sheet (cross-tabulated rows).
+    """
+    joined = " ".join(header)
+    has_campaign = "캠페인" in joined
+    has_age = "연령" in joined
+    has_cost = "비용" in joined
+    has_period = "기간" in joined or "날짜" in joined
+    return has_campaign and has_age and has_cost and has_period
+
+
+def _find_breakdown_col(header: list[str], *keywords: str) -> int | None:
+    """Locate first column whose normalized header contains any keyword."""
+    for idx, h in enumerate(header):
+        normalized = h.replace(" ", "")
+        for kw in keywords:
+            if kw.replace(" ", "") in normalized:
+                return idx
+    return None
+
+
+def _classify_bid_mode_from_name(name: str) -> Literal["auto", "manual", "unknown"]:
+    """Parse 자동/수동 from campaign name suffix."""
+    if not name:
+        return "unknown"
+    # match suffix or any token boundary
+    if name.endswith("_자동") or "_자동_" in name or name.endswith(" 자동"):
+        return "auto"
+    if name.endswith("_수동") or "_수동_" in name or name.endswith(" 수동"):
+        return "manual"
+    if "자동" in name and "수동" not in name:
+        return "auto"
+    if "수동" in name and "자동" not in name:
+        return "manual"
+    return "unknown"
+
+
+def _campaign_creative_key(name: str) -> str:
+    """Extract the shared creative identity from a campaign name by
+    stripping the trailing `_수동` / `_자동` token. Used for auto/manual pairing.
+    """
+    for suffix in ("_수동", "_자동", " 수동", " 자동"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _aggregate_breakdown(
+    header: list[str], data_rows: list[tuple]
+) -> tuple[list[Segment], list[CampaignPerf], str | None, str | None]:
+    """Aggregate long-format rows into age segments + per-campaign rows.
+
+    Each input row is (기간, 캠페인, 캠페인ID?, 연령, 비용, 노출, 도달?, 클릭, ...,
+    단골, 후기, 쿠폰, 관심, 댓글, 전화문의, 채팅문의, 포장주문, 리드폼 잠재고객, ...).
+
+    Returns (ages, campaigns, period_first, period_last) — period strings are
+    inclusive bounds extracted from the 기간/날짜 column (empty if not present).
+    """
+    col_age = _find_breakdown_col(header, "연령")
+    col_campaign = _find_breakdown_col(header, "캠페인 이름", "캠페인이름", "캠페인")
+    col_cost = _find_breakdown_col(header, "비용")
+    col_imp = _find_breakdown_col(header, "노출")
+    col_click = _find_breakdown_col(header, "클릭 수", "클릭수")
+    col_period = _find_breakdown_col(header, "기간", "날짜")
+
+    action_cols = [
+        idx for idx, h in enumerate(header)
+        if any(kw.replace(" ", "") in h.replace(" ", "") for kw in _ACTION_KEYWORDS)
+        and "CPA" not in h and "CVR" not in h
+        and "비용" not in h  # exclude '단골당 비용' etc.
+    ]
+
+    if col_age is None or col_cost is None:
+        return [], [], None, None
+
+    age_accum: dict[str, dict[str, int]] = {}
+    camp_accum: dict[str, dict[str, int]] = {}
+    period_first: str | None = None
+    period_last: str | None = None
+
+    for row in data_rows:
+        if not row or all(c is None or str(c).strip() == "" for c in row):
+            continue
+
+        age = _cell_str(row, col_age)
+        camp = _cell_str(row, col_campaign) if col_campaign is not None else ""
+
+        if not age and not camp:
+            continue
+        if age in {"합계", "Total", "소계"}:
+            continue
+
+        if col_period is not None:
+            period_val = _normalize_period_cell(row, col_period)
+            if period_val:
+                if period_first is None or period_val < period_first:
+                    period_first = period_val
+                if period_last is None or period_val > period_last:
+                    period_last = period_val
+
+        cost = _cell_int(row, col_cost)
+        imp = _cell_int(row, col_imp) if col_imp is not None else 0
+        clk = _cell_int(row, col_click) if col_click is not None else 0
+        actions = sum(_cell_int(row, c) for c in action_cols)
+
+        if age:
+            acc = age_accum.setdefault(
+                age, {"cost": 0, "actions": 0, "impressions": 0, "clicks": 0},
+            )
+            acc["cost"] += cost
+            acc["actions"] += actions
+            acc["impressions"] += imp
+            acc["clicks"] += clk
+
+        if camp:
+            acc = camp_accum.setdefault(
+                camp,
+                {"cost": 0, "actions": 0, "impressions": 0, "clicks": 0,
+                 "ages": set()},  # type: ignore[dict-item]
+            )
+            acc["cost"] += cost
+            acc["actions"] += actions
+            acc["impressions"] += imp
+            acc["clicks"] += clk
+            if age:
+                acc["ages"].add(age)  # type: ignore[union-attr]
+
+    ages = [
+        Segment(
+            label=label, cost=v["cost"], actions=v["actions"],
+            impressions=v["impressions"], clicks=v["clicks"],
+        )
+        for label, v in sorted(age_accum.items(), key=lambda kv: _age_sort_key(kv[0]))
+    ]
+
+    campaigns = []
+    for name, v in camp_accum.items():
+        ages_set: set[str] = v["ages"]  # type: ignore[assignment]
+        age_range = ",".join(sorted(ages_set, key=_age_sort_key)) if ages_set else ""
+        campaigns.append(
+            CampaignPerf(
+                name=name,
+                cost=v["cost"], actions=v["actions"],
+                impressions=v["impressions"], clicks=v["clicks"],
+                creative_count=1,
+                bid_mode=_classify_bid_mode_from_name(name),
+                age_range=age_range,
+                creative_id=_campaign_creative_key(name),
+            )
+        )
+
+    return ages, campaigns, period_first, period_last
+
+
+def _normalize_period_cell(row: tuple, idx: int | None) -> str:
+    """Format a period cell value as YYYY.MM.DD-like string for sortable comparison."""
+    if idx is None or idx >= len(row):
+        return ""
+    v = row[idx]
+    if v is None:
+        return ""
+    # datetime → ISO date
+    try:
+        from datetime import datetime, date
+        if isinstance(v, datetime):
+            return v.strftime("%Y.%m.%d")
+        if isinstance(v, date):
+            return v.strftime("%Y.%m.%d")
+    except Exception:  # noqa: BLE001
+        pass
+    s = str(v).strip().rstrip(".")
+    return s
+
+
+# ─────────────────────────── funnel + economics ───────────────────────────
+
+
+@dataclass(frozen=True)
+class Funnel:
+    """Aggregated funnel for ad → click → action with bottleneck identification."""
+
+    impressions: int
+    clicks: int
+    actions: int
+
+    @property
+    def ctr(self) -> float:
+        return (self.clicks / self.impressions * 100) if self.impressions > 0 else 0.0
+
+    @property
+    def cvr(self) -> float:
+        return (self.clicks > 0 and (self.actions / self.clicks * 100)) or 0.0
+
+    @property
+    def drop_impression_to_click(self) -> float:
+        if self.impressions <= 0:
+            return 0.0
+        return (1 - (self.clicks / self.impressions)) * 100
+
+    @property
+    def drop_click_to_action(self) -> float:
+        if self.clicks <= 0:
+            return 0.0
+        return (1 - (self.actions / self.clicks)) * 100
+
+    @property
+    def bottleneck(self) -> str:
+        """Returns the stage with highest drop-off, or '' if no data."""
+        if self.impressions <= 0:
+            return ""
+        a = self.drop_impression_to_click
+        b = self.drop_click_to_action
+        if a >= b:
+            return "노출→클릭"
+        return "클릭→행동"
+
+
+def calc_funnel(items: Sequence) -> Funnel:
+    """Aggregate impressions/clicks/actions across Segments or CampaignPerf rows."""
+    imps = sum(getattr(x, "impressions", 0) for x in items)
+    clks = sum(getattr(x, "clicks", 0) for x in items)
+    acts = sum(getattr(x, "actions", 0) for x in items)
+    return Funnel(impressions=imps, clicks=clks, actions=acts)
+
+
+@dataclass(frozen=True)
+class Economics:
+    """MAX CPA / 한계 소진율 / 손익 판정.
+
+    avg_order_value · target_margin_rate · variable_cost_rate가 0이면
+    아무 계산도 못 하므로 max_cpa = 0, status = "unknown"으로 반환된다.
+    """
+
+    total_cost: int
+    total_actions: int
+    current_cpa: float
+    avg_order_value: int            # 객단가 (광고주 입력)
+    target_margin_rate: float       # 0.0 ~ 1.0 (입력 % / 100)
+    variable_cost_rate: float = 0.0  # 원가율 (0 = 디지털 상품 등)
+    breakeven_cpa: float = 0.0       # 손익분기 CPA = 객단가 × (1 - 원가율)
+    max_cpa: float = 0.0             # 목표이익 반영 후 허용 CPA
+    burn_rate: float = 0.0           # current_cpa / max_cpa
+    status: str = "unknown"          # profit | breakeven | loss | unknown
+    expected_revenue: int = 0
+    expected_profit: int = 0
+
+
+def calc_economics(
+    total_cost: int,
+    total_actions: int,
+    *,
+    avg_order_value: int = 0,
+    target_margin_rate: float = 0.0,
+    variable_cost_rate: float = 0.0,
+) -> Economics:
+    """Calculate MAX CPA + 손익 status from inputs.
+
+    breakeven_cpa = 객단가 × (1 - 원가율)
+    max_cpa       = breakeven_cpa × (1 - 목표이익률)
+    burn_rate     = current_cpa / max_cpa
+        status:
+          burn_rate ≥ 1.0 → "loss"  (적자)
+          burn_rate ≥ 0.7 → "breakeven"  (손익분기 근접)
+          burn_rate <  0.7 → "profit"  (확장 여력)
+    """
+    current_cpa = total_cost / total_actions if total_actions > 0 else 0.0
+    if avg_order_value <= 0:
+        return Economics(
+            total_cost=total_cost, total_actions=total_actions,
+            current_cpa=current_cpa, avg_order_value=0,
+            target_margin_rate=target_margin_rate,
+            variable_cost_rate=variable_cost_rate,
+            status="unknown",
+        )
+
+    breakeven = avg_order_value * (1.0 - max(0.0, min(1.0, variable_cost_rate)))
+    margin = max(0.0, min(1.0, target_margin_rate))
+    max_cpa = breakeven * (1.0 - margin)
+
+    burn = current_cpa / max_cpa if max_cpa > 0 else 0.0
+    if burn >= 1.0:
+        status = "loss"
+    elif burn >= 0.7:
+        status = "breakeven"
+    else:
+        status = "profit"
+
+    revenue = total_actions * avg_order_value
+    profit = int(revenue * (1.0 - variable_cost_rate) - total_cost)
+
+    return Economics(
+        total_cost=total_cost,
+        total_actions=total_actions,
+        current_cpa=current_cpa,
+        avg_order_value=avg_order_value,
+        target_margin_rate=margin,
+        variable_cost_rate=variable_cost_rate,
+        breakeven_cpa=breakeven,
+        max_cpa=max_cpa,
+        burn_rate=burn,
+        status=status,
+        expected_revenue=revenue,
+        expected_profit=profit,
+    )
+
+
+def _age_sort_key(label: str) -> tuple[int, str]:
+    """Sort age labels like '40-44', '45-49', '60 이상' numerically."""
+    import re
+    m = re.match(r"\s*(\d+)", label)
+    if m:
+        return (int(m.group(1)), label)
+    return (10_000, label)

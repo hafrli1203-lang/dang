@@ -306,3 +306,107 @@ def test_parse_demographic_xlsx_empty_bytes_returns_empty() -> None:
     # openpyxl would raise on empty input; ensure parser handles gracefully
     with pytest.raises(Exception):  # noqa: BLE001
         parse_demographic_xlsx(b"")
+
+
+# ───────────────── long-format breakdown parser ─────────────────
+
+
+def _build_breakdown_xlsx() -> bytes:
+    """Single-sheet long-format mimicking 당근 광고관리자 직접 내보내기."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "breakdown"
+    ws.append([
+        "기간", "캠페인 이름", "캠페인 ID", "연령",
+        "비용 (VAT 포함)", "노출 수", "도달 수", "클릭 수", "클릭률",
+        "클릭당 비용(CPC)", "노출당 비용(CPM)",
+        "단골 수", "후기 수", "쿠폰 다운로드 수", "관심 수", "댓글 수",
+        "전화 문의 수", "채팅 문의 수", "포장 주문 수",
+    ])
+    rows = [
+        # (period, campaign, id, age, cost, imp, reach, click, ctr, cpc, cpm,
+        #  단골, 후기, 쿠폰, 관심, 댓글, 전화, 채팅, 포장)
+        ("D1", "A_수동", 1, "40-44", 1000, 500, 400, 10, 2.0, 100, 2000, 0, 0, 0, 0, 0, 0, 1, 0),
+        ("D1", "A_수동", 1, "50-54", 2000, 700, 600, 12, 1.7, 167, 2857, 2, 0, 1, 0, 0, 0, 0, 0),
+        ("D1", "A_자동", 2, "40-44", 1500, 600, 500, 11, 1.8, 136, 2500, 0, 0, 0, 0, 0, 0, 0, 0),
+        ("D1", "A_자동", 2, "50-54", 2500, 800, 700, 13, 1.6, 192, 3125, 1, 0, 2, 1, 0, 0, 0, 0),
+        ("D2", "A_수동", 1, "40-44", 1100, 520, 410, 11, 2.1, 100, 2115, 0, 0, 0, 0, 0, 0, 1, 0),
+    ]
+    for r in rows:
+        ws.append(r)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def test_breakdown_parser_aggregates_age_segments() -> None:
+    data = _build_breakdown_xlsx()
+    parsed = parse_demographic_xlsx(data)
+
+    # 2 distinct ages aggregated across all rows
+    ages = {a.label: a for a in parsed["ages"]}
+    assert set(ages) == {"40-44", "50-54"}
+    # 40-44 totals: cost=1000+1500+1100=3600; actions: 2 (one 채팅, one 전화) — actually 1+1 channels
+    # D1 A_수동 40-44 channels=(0..,채팅=1,...) =1 ; D1 A_자동 40-44 = 0 ; D2 A_수동 40-44 = 1 → total 2
+    assert ages["40-44"].cost == 3600
+    assert ages["40-44"].actions == 2  # 1 채팅 + 1 채팅
+    # 50-54 totals: cost=2000+2500=4500; actions: 단골2+쿠폰1+단골1+쿠폰2+관심1 = 7
+    assert ages["50-54"].cost == 4500
+    assert ages["50-54"].actions == 7
+
+
+def test_breakdown_parser_aggregates_campaigns_with_bid_mode() -> None:
+    data = _build_breakdown_xlsx()
+    parsed = parse_demographic_xlsx(data)
+
+    camps = {c.name: c for c in parsed["campaigns"]}
+    assert set(camps) == {"A_수동", "A_자동"}
+
+    suho = camps["A_수동"]
+    assert suho.bid_mode == "manual"
+    # cost: D1 40-44 1000 + D1 50-54 2000 + D2 40-44 1100 = 4100
+    assert suho.cost == 4100
+    # actions: 채팅1 + 단골2+쿠폰1 + 채팅1 = 5
+    assert suho.actions == 5
+    assert "40-44" in suho.age_range and "50-54" in suho.age_range
+
+    auto = camps["A_자동"]
+    assert auto.bid_mode == "auto"
+    assert auto.cost == 4000  # 1500 + 2500
+    # actions: 0 + (단골1+쿠폰2+관심1) = 4
+    assert auto.actions == 4
+
+
+def test_breakdown_creative_id_strips_bid_suffix() -> None:
+    data = _build_breakdown_xlsx()
+    parsed = parse_demographic_xlsx(data)
+
+    camps = {c.name: c for c in parsed["campaigns"]}
+    # 수동/자동 pair should share the same creative_id for pairing detection
+    assert camps["A_수동"].creative_id == "A"
+    assert camps["A_자동"].creative_id == "A"
+
+
+def test_breakdown_pairing_detects_complete_pair() -> None:
+    data = _build_breakdown_xlsx()
+    parsed = parse_demographic_xlsx(data)
+    gaps = check_auto_manual_pairing(parsed["campaigns"])
+    # Both 수동 and 자동 exist with same age coverage → no gaps
+    assert gaps == []
+
+
+def test_breakdown_pairing_detects_orphan_manual() -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([
+        "기간", "캠페인 이름", "연령", "비용 (VAT 포함)", "노출 수", "클릭 수", "단골 수",
+    ])
+    ws.append(("D1", "Only_수동", "40-44", 1000, 500, 10, 1))
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    parsed = parse_demographic_xlsx(buf.getvalue())
+    gaps = check_auto_manual_pairing(parsed["campaigns"])
+    assert len(gaps) == 1
+    assert gaps[0].missing_counterpart == "auto"

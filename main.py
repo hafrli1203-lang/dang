@@ -83,11 +83,34 @@ if __name__ in ("__main__", "__mp_main__"):
             print(f"\n[경고] 데스크톱 창 실패: {native_err}", file=sys.stderr)
 
     if not native_available:
+        import socket
+
+        def _pick_free_port(preferred: int = 8000, max_tries: int = 10) -> int:
+            """127.0.0.1 기준으로 비어 있는 포트를 찾는다.
+
+            다른 앱(예: 다른 프로젝트의 uvicorn)이 127.0.0.1:8000을 선점하면
+            0.0.0.0 바인딩은 성공해도 localhost 접속이 그 앱으로 가버린다.
+            그래서 127.0.0.1에 직접 바인딩해 보고 실패하면 다음 포트를 쓴다.
+            """
+            for port in range(preferred, preferred + max_tries):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    try:
+                        s.bind(("127.0.0.1", port))
+                    except OSError:
+                        continue
+                return port
+            return preferred
+
+        _port = _pick_free_port(8000)
+        if _port != 8000:
+            print(f"\n[안내] 8000 포트를 다른 프로그램이 사용 중이라 {_port} 포트로 실행합니다.", file=sys.stderr)
         print("\n[안내] 브라우저 모드로 실행합니다.", file=sys.stderr)
-        print("브라우저에서  http://localhost:8000  을 열어주세요.\n", file=sys.stderr)
+        print(f"브라우저에서  http://localhost:{_port}  을 열어주세요.\n", file=sys.stderr)
         ui.run(
             native=False,
-            port=8000,
+            port=_port,
             show=True,
             title="당근 광고 기획 도우미",
             storage_secret=storage_secret,

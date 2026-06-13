@@ -1,8 +1,13 @@
-"""Screen 1 -- 프로젝트 생성 / 선택."""
+"""Screen 1 -- 프로젝트 관리 (카드 그리드 + 다이얼로그 편집).
+
+배치 원칙:
+- 프로젝트는 카드 그리드로 한눈에 (세로 목록 금지)
+- 생성/편집 폼은 다이얼로그로 — 평소 화면을 차지하지 않는다
+- 상단 한 줄: 제목/개수 + 검색 + 데이터 관리 + 새 프로젝트
+"""
 from nicegui import ui, app as nicegui_app
 
 from app.common import create_nav, safe_download
-from app.theme import section_header
 from app.database import (
     get_projects,
     get_project,
@@ -20,128 +25,191 @@ def project_page() -> None:
     create_nav("/")
 
     # -- page-level state --
-    state: dict = {"current_id": None}
+    state: dict = {"current_id": None, "query": ""}
 
-    # -- layout --
-    with ui.column().classes("dg-page-content w-full gap-6"):
+    # ══════════════════ 생성/편집 다이얼로그 ══════════════════
+    with ui.dialog() as form_dlg, ui.card().classes("dg-card").style(
+        "width: 680px; max-width: 95vw"
+    ):
+        form_title = ui.label("새 프로젝트").classes("dg-section-title")
+        with ui.grid(columns=2).classes("w-full gap-3 mt-3"):
+            name_in = ui.input("광고주명 *").classes("dg-input").props("outlined dense")
+            campaign_name_in = ui.input("캠페인명 (예: 6월_신규방문)").classes("dg-input").props("outlined dense")
+            industry_in = ui.input("업종 (예: 카페, 헬스장)").classes("dg-input").props("outlined dense")
+            region_in = ui.input("지역 (예: 서울 마포구 상수동)").classes("dg-input").props("outlined dense")
+            goal_in = ui.input("광고 목표 (예: 신규 방문 유도)").classes("dg-input").props("outlined dense")
+            budget_in = ui.input("예산 (예: 300,000원)").classes("dg-input").props("outlined dense")
+            period_in = ui.input("집행 기간 (예: 2024.06.01~06.30)").classes("dg-input").props("outlined dense")
+            reference_in = ui.input("참고 링크 (선택, URL)").classes("dg-input").props("outlined dense")
+        benefits_in = ui.textarea(
+            "주요 혜택/특징 (3~5가지, 줄바꿈 구분)"
+        ).classes("w-full mt-2 dg-input").props("outlined dense rows=4")
 
-        # Page header
-        ui.label("프로젝트 관리").classes("dg-page-title")
-        ui.label("광고주 프로젝트를 생성하고 관리합니다.").classes("dg-page-subtitle")
+        with ui.row().classes("mt-4 gap-2 w-full items-center"):
+            delete_btn = ui.button(
+                "삭제", icon="delete_outline", on_click=lambda: _confirm_delete(),
+            ).classes("dg-btn-danger dg-btn-sm")
+            ui.space()
+            ui.button("취소", on_click=form_dlg.close).classes("dg-btn-secondary")
+            ui.button("저장", icon="save", on_click=lambda: _save()).classes("dg-btn-primary")
 
-        with ui.row().classes("w-full gap-6 items-start"):
+    # ══════════════════ 삭제 확인 다이얼로그 ══════════════════
+    with ui.dialog() as del_dlg, ui.card().classes("dg-card"):
+        ui.label("이 프로젝트를 삭제할까요?").classes("dg-section-title")
+        ui.label("생성 내역과 성과 데이터도 함께 사라지고, 되돌릴 수 없어요.").classes("dg-text-sm mt-1")
+        with ui.row().classes("mt-5 gap-3"):
+            ui.button("삭제", icon="delete", on_click=lambda: _delete()).classes("dg-btn-danger")
+            ui.button("취소", on_click=del_dlg.close).classes("dg-btn-secondary")
 
-            # -- LEFT: project list --
-            with ui.card().classes("dg-card").style("width: 280px; flex-shrink: 0"):
-                section_header("list", "저장된 프로젝트")
-                project_list = ui.column().classes("w-full gap-1")
+    # ══════════════════ 페이지 레이아웃 ══════════════════
+    with ui.column().classes("dg-page-content w-full gap-4"):
 
-                ui.button(
-                    "새 프로젝트",
-                    icon="add",
-                    on_click=lambda: load_form(None),
-                ).classes("dg-btn-primary w-full mt-3")
-
-            # -- RIGHT: form --
-            with ui.card().classes("dg-card flex-1"):
-                form_title = ui.label("새 프로젝트 만들기").classes("dg-section-title mb-4")
-
-                with ui.grid(columns=2).classes("w-full gap-4"):
-                    name_in = ui.input("광고주명 *").classes("dg-input").props("outlined dense")
-                    campaign_name_in = ui.input("캠페인명 (예: 6월_신규방문)").classes("dg-input").props("outlined dense")
-                    industry_in = ui.input("업종 (예: 카페, 헬스장)").classes("dg-input").props("outlined dense")
-                    region_in = ui.input("지역 (예: 서울 마포구 상수동)").classes("dg-input").props("outlined dense")
-                    goal_in = ui.input("광고 목표 (예: 신규 방문 유도)").classes("dg-input").props("outlined dense")
-                    budget_in = ui.input("예산 (예: 300,000원)").classes("dg-input").props("outlined dense")
-                    period_in = ui.input("집행 기간 (예: 2024.06.01~06.30)").classes("dg-input").props("outlined dense")
-
-                benefits_in = ui.textarea(
-                    "주요 혜택/특징 (3~5가지, 줄바꿈 구분)"
-                ).classes("w-full mt-2 dg-input").props("outlined dense rows=4")
-
-                reference_in = ui.input("참고 링크 (선택, URL)").classes("w-full mt-1 dg-input").props("outlined dense")
-
-                # Action buttons
-                with ui.row().classes("mt-6 gap-3"):
-                    save_btn = ui.button(
-                        "저장", icon="save", on_click=lambda: _save()
-                    ).classes("dg-btn-primary")
-                    to_plan_btn = ui.button(
-                        "광고 기획 시작",
-                        icon="arrow_forward",
-                        on_click=lambda: ui.navigate.to("/planning"),
-                    ).classes("dg-btn-success")
-                    delete_btn = ui.button(
-                        "삭제", icon="delete_outline", on_click=lambda: _delete()
-                    ).classes("dg-btn-danger").bind_visibility_from(
-                        state, "current_id", lambda v: v is not None
+        # 헤더 한 줄: 제목 + 검색 + 데이터 관리 + 새 프로젝트
+        with ui.row().classes("w-full items-end gap-3 flex-wrap"):
+            with ui.column().classes("gap-0"):
+                ui.label("프로젝트").classes("dg-page-title").style("margin-bottom: 0 !important")
+                count_label = ui.label("").classes("dg-text-sm")
+            ui.space()
+            search_in = ui.input(placeholder="이름·캠페인·지역 검색").props(
+                "outlined dense clearable"
+            ).classes("w-64 dg-input")
+            with ui.button(icon="settings").props("flat round").style(
+                "color: var(--dg-text-tertiary)"
+            ):
+                with ui.menu().classes("dg-card"):
+                    ui.menu_item(
+                        "프로젝트 CSV 내보내기",
+                        lambda: safe_download(export_projects_csv(), "프로젝트_목록.csv"),
                     )
+                    ui.menu_item(
+                        "성과데이터 CSV 내보내기",
+                        lambda: safe_download(export_performance_csv(), "성과데이터_전체.csv"),
+                    )
+                    ui.menu_item("DB 백업", lambda: _do_backup())
+            ui.button(
+                "새 프로젝트", icon="add", on_click=lambda: _open_create(),
+            ).classes("dg-btn-primary")
 
-        # -- Data management --
-        with ui.card().classes("dg-card w-full"):
-            section_header("storage", "데이터 관리", "프로젝트 데이터를 내보내거나 백업합니다.")
-            with ui.row().classes("gap-3 flex-wrap"):
-                ui.button(
-                    "프로젝트 CSV 내보내기",
-                    icon="table_chart",
-                    on_click=lambda: safe_download(export_projects_csv(), "프로젝트_목록.csv"),
-                ).classes("dg-btn-secondary")
-                ui.button(
-                    "성과데이터 CSV 내보내기",
-                    icon="analytics",
-                    on_click=lambda: safe_download(export_performance_csv(), "성과데이터_전체.csv"),
-                ).classes("dg-btn-secondary")
-                ui.button(
-                    "DB 백업",
-                    icon="backup",
-                    on_click=lambda: _do_backup(),
-                ).classes("dg-btn-secondary")
+        # 카드 그리드
+        grid = ui.element("div").classes("dg-project-grid")
 
-    # -- helpers --
+    # ══════════════════ 동작 ══════════════════
 
-    def refresh_list() -> None:
-        project_list.clear()
+    def _initial(name: str) -> str:
+        return (name or "?").strip()[:1].upper()
+
+    def _matches(p: dict, q: str) -> bool:
+        hay = " ".join([
+            p.get("name", ""), p.get("campaign_name", "") or "",
+            p.get("region", "") or "", p.get("industry", "") or "",
+        ]).lower()
+        return q in hay
+
+    def refresh_grid() -> None:
+        grid.clear()
         projects = get_projects()
-        with project_list:
-            if not projects:
-                ui.label("프로젝트가 없습니다").classes("dg-label-sm py-2")
-            for p in projects:
-                pid = p["id"]
-                is_active = state["current_id"] == pid
-                btn_label = p["name"]
-                if p.get("campaign_name"):
-                    btn_label += f" | {p['campaign_name']}"
-                ui.button(
-                    btn_label,
-                    icon="storefront",
-                    on_click=lambda _pid=pid: load_form(_pid),
-                ).classes(
-                    "dg-project-item" + (" active" if is_active else "")
-                ).props("flat no-caps align=left")
+        q = (state["query"] or "").strip().lower()
+        filtered = [p for p in projects if _matches(p, q)] if q else projects
+        count_label.set_text(f"광고주 프로젝트 {len(projects)}개")
+        selected = nicegui_app.storage.user.get("current_project_id")
 
-    def load_form(pid: int | None) -> None:
-        state["current_id"] = pid
-        if pid is None:
-            form_title.set_text("새 프로젝트 만들기")
-            for inp in (name_in, campaign_name_in, industry_in, region_in, goal_in, budget_in, period_in, reference_in):
-                inp.value = ""
-            benefits_in.value = ""
-        else:
-            p = get_project(pid)
-            if not p:
+        with grid:
+            if not projects:
+                with ui.column().classes("dg-empty w-full items-center").style("grid-column: 1/-1"):
+                    ui.icon("storefront", size="56px").classes("dg-empty-icon")
+                    ui.label("아직 프로젝트가 없어요. '새 프로젝트'로 시작해 보세요.").classes("dg-empty-text")
                 return
-            form_title.set_text(f"프로젝트 수정: {p['name']}")
-            name_in.value = p.get("name", "")
-            campaign_name_in.value = p.get("campaign_name", "")
-            industry_in.value = p.get("industry", "")
-            region_in.value = p.get("region", "")
-            goal_in.value = p.get("goal", "")
-            budget_in.value = p.get("budget", "")
-            period_in.value = p.get("period", "")
-            benefits_in.value = p.get("benefits", "")
-            reference_in.value = p.get("reference_url", "")
-            nicegui_app.storage.user["current_project_id"] = pid
-        refresh_list()
+            if not filtered:
+                with ui.column().classes("dg-empty w-full items-center").style("grid-column: 1/-1"):
+                    ui.icon("search_off", size="56px").classes("dg-empty-icon")
+                    ui.label(f"'{state['query']}' 검색 결과가 없어요.").classes("dg-empty-text")
+                return
+
+            for p in filtered:
+                pid = p["id"]
+                is_active = selected == pid
+                card = ui.element("div").classes(
+                    "dg-project-card" + (" active" if is_active else "")
+                )
+                with card:
+                    # 상단: 아바타 + 이름/캠페인 + 편집
+                    with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                        with ui.element("div").classes("dg-avatar"):
+                            ui.label(_initial(p.get("name", "")))
+                        with ui.column().classes("gap-0").style("flex: 1; min-width: 0"):
+                            ui.label(p.get("name", "")).classes("dg-project-card-title w-full")
+                            ui.label(
+                                p.get("campaign_name") or "캠페인명 미입력"
+                            ).classes("dg-project-card-sub w-full")
+                        ui.button(
+                            icon="edit",
+                            color=None,
+                            on_click=lambda _, _pid=pid: _open_edit(_pid),
+                        ).props("flat round dense").style("color: var(--dg-text-caption)")
+
+                    # 메타 칩: 업종 / 지역
+                    with ui.row().classes("gap-2 flex-wrap"):
+                        if p.get("industry"):
+                            ui.label(p["industry"]).classes("dg-meta-chip")
+                        if p.get("region"):
+                            ui.label(p["region"]).classes("dg-meta-chip")
+                        if p.get("budget"):
+                            ui.label(f"예산 {p['budget']}").classes("dg-meta-chip")
+
+                    # 하단: 바로가기
+                    with ui.row().classes("gap-1 w-full items-center"):
+                        ui.button(
+                            "기획 시작", icon="edit_note", color=None,
+                            on_click=lambda _, _pid=pid: _go(_pid, "/planning"),
+                        ).props("flat dense no-caps").classes("dg-quick-link")
+                        ui.button(
+                            "성과 보고서", icon="assessment", color=None,
+                            on_click=lambda _, _pid=pid: _go(_pid, "/report"),
+                        ).props("flat dense no-caps").classes("dg-quick-link")
+                        ui.space()
+                        if is_active:
+                            ui.label("선택됨").classes("dg-badge dg-badge-success")
+                # 카드 클릭 = 현재 프로젝트로 선택
+                card.on("click", lambda _, _pid=pid: _select(_pid))
+
+    def _select(pid: int) -> None:
+        nicegui_app.storage.user["current_project_id"] = pid
+        state["current_id"] = pid
+        refresh_grid()
+
+    def _go(pid: int, path: str) -> None:
+        nicegui_app.storage.user["current_project_id"] = pid
+        ui.navigate.to(path)
+
+    def _fill_form(p: dict | None) -> None:
+        values = p or {}
+        name_in.value = values.get("name", "")
+        campaign_name_in.value = values.get("campaign_name", "") or ""
+        industry_in.value = values.get("industry", "") or ""
+        region_in.value = values.get("region", "") or ""
+        goal_in.value = values.get("goal", "") or ""
+        budget_in.value = values.get("budget", "") or ""
+        period_in.value = values.get("period", "") or ""
+        benefits_in.value = values.get("benefits", "") or ""
+        reference_in.value = values.get("reference_url", "") or ""
+
+    def _open_create() -> None:
+        state["current_id"] = None
+        form_title.set_text("새 프로젝트")
+        _fill_form(None)
+        delete_btn.set_visibility(False)
+        form_dlg.open()
+
+    def _open_edit(pid: int) -> None:
+        p = get_project(pid)
+        if not p:
+            ui.notify("프로젝트를 찾을 수 없어요. 새로고침 후 다시 시도해 주세요.", type="negative")
+            return
+        state["current_id"] = pid
+        form_title.set_text(f"프로젝트 수정 — {p.get('name', '')}")
+        _fill_form(p)
+        delete_btn.set_visibility(True)
+        form_dlg.open()
 
     def _collect() -> dict:
         return {
@@ -159,46 +227,48 @@ def project_page() -> None:
     def _save() -> None:
         data = _collect()
         if not data["name"]:
-            ui.notify("광고주명을 입력해주세요.", type="negative")
+            ui.notify("광고주명을 입력해 주세요.", type="negative")
             return
         if state["current_id"]:
             update_project(state["current_id"], data)
-            ui.notify("수정되었습니다.", type="positive")
+            ui.notify("수정한 내용을 저장했어요.", type="positive")
         else:
             new_id = save_project(data)
             state["current_id"] = new_id
             nicegui_app.storage.user["current_project_id"] = new_id
-            ui.notify("저장되었습니다.", type="positive")
-        refresh_list()
+            ui.notify("새 프로젝트를 저장했어요.", type="positive")
+        form_dlg.close()
+        refresh_grid()
+
+    def _confirm_delete() -> None:
+        if state["current_id"]:
+            del_dlg.open()
 
     def _delete() -> None:
         pid = state["current_id"]
         if not pid:
             return
-
-        with ui.dialog() as dlg, ui.card().classes("dg-card"):
-            ui.label("이 프로젝트를 삭제하시겠습니까?").classes("dg-section-title")
-            ui.label("관련된 생성 내역, 성과 데이터도 함께 삭제됩니다.").classes("dg-text-sm mt-1")
-            with ui.row().classes("mt-5 gap-3"):
-                ui.button(
-                    "삭제",
-                    icon="delete",
-                    on_click=lambda: (
-                        delete_project(pid),
-                        dlg.close(),
-                        load_form(None),
-                        ui.notify("삭제되었습니다."),
-                    ),
-                ).classes("dg-btn-danger")
-                ui.button("취소", on_click=dlg.close).classes("dg-btn-secondary")
-        dlg.open()
+        delete_project(pid)
+        if nicegui_app.storage.user.get("current_project_id") == pid:
+            nicegui_app.storage.user["current_project_id"] = None
+        state["current_id"] = None
+        del_dlg.close()
+        form_dlg.close()
+        ui.notify("프로젝트를 삭제했어요.")
+        refresh_grid()
 
     def _do_backup() -> None:
         try:
             path = backup_db()
-            ui.notify(f"백업 완료: {path.name}", type="positive")
+            ui.notify(f"백업을 완료했어요: {path.name}", type="positive")
         except Exception as exc:
-            ui.notify(f"백업 실패: {exc}", type="negative")
+            ui.notify(f"백업하지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
+
+    def _on_search(e) -> None:
+        state["query"] = e.value or ""
+        refresh_grid()
+
+    search_in.on_value_change(_on_search)
 
     # initial render
-    refresh_list()
+    refresh_grid()
