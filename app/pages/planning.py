@@ -28,7 +28,7 @@ from app.content.news_post_rules import (
     validate_news_post as validate_news_post_bc,
     build_news_repair_prompt as build_news_repair_bc,
 )
-from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
+from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.reporting.docx_report import build_planning_docx
 
 
@@ -212,7 +212,7 @@ def planning_page() -> None:
                 with ui.column().classes("gap-1"):
                     ui.label("AI 엔진").classes("dg-label-sm")
                     engine_radio = ui.radio(
-                        {"claude": "Claude", "gemini": "Gemini", "both": "둘 다 (비교)"},
+                        {"claude": "Claude", "gpt": "GPT", "coordinate": "Claude+GPT 조율"},
                         value="claude",
                     ).props("inline").classes("dg-radio")
 

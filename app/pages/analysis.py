@@ -45,7 +45,7 @@ from app.ai_engine import (
     build_analysis_prompt,
     parse_analysis_sections,
 )
-from app.ai.providers import get_provider
+from app.ai.providers import get_provider, OpenAIProvider
 from app.theme import section_header
 
 _log = logging.getLogger("analysis")
@@ -305,7 +305,7 @@ def analysis_page() -> None:
                 with ui.column().classes("gap-1"):
                     ui.label("AI 엔진").classes("dg-label-sm")
                     engine_sel = ui.radio(
-                        {"claude": "Claude", "gemini": "Gemini"}, value="claude",
+                        {"claude": "Claude", "gpt": "GPT", "coordinate": "Claude+GPT 조율"}, value="claude",
                     ).props("inline").classes("dg-radio")
                 with ui.column().classes("gap-1"):
                     ui.label("객단가 (원, 광고주 입력)").classes("dg-label-sm")
@@ -511,7 +511,8 @@ def analysis_page() -> None:
                 project = get_project(pid) if pid else {}
                 project = project or {"name": "광고주", "campaign_name": state.get("filename", "")}
 
-                run_step.set_text(f"2/3 {engine.capitalize()}가 보고서를 작성하고 있어요...")
+                engine_name = {"gpt": "GPT", "coordinate": "Claude+GPT 조율"}.get(engine, "Claude")
+                run_step.set_text(f"2/3 {engine_name}가 보고서를 작성하고 있어요...")
                 newspost_title = (title_input.value or "").strip()
                 newspost_text = (newspost_input.value or "").strip()
                 has_thumbnail = bool(state.get("thumbnail_data"))
@@ -524,23 +525,50 @@ def analysis_page() -> None:
                     newspost_text=newspost_text,
                     has_thumbnail=has_thumbnail,
                 )
-                provider = get_provider(engine)
-                thumb_bytes = state.get("thumbnail_data") if engine == "claude" else None
+                thumb_bytes = state.get("thumbnail_data")
                 thumb_mime = state.get("thumbnail_mime", "image/png")
-                if thumb_bytes:
-                    # Multi-modal call (Claude CLI stream-json)
+
+                if engine == "coordinate":
+                    from app.ai.coordination import synthesize
+                    claude_p = get_provider("claude")
+                    gpt_p = OpenAIProvider()
+
+                    def _claude_draft():
+                        # 썸네일은 멀티모달 지원하는 Claude 초안에만 전달
+                        if thumb_bytes:
+                            try:
+                                return claude_p.generate_text(
+                                    prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS,
+                                    image=thumb_bytes, image_mime=thumb_mime,
+                                )
+                            except TypeError:
+                                pass  # provider가 image 인자 미지원 → 텍스트 전용
+                        return claude_p.generate_text(prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS)
+
+                    c_text, g_text = await asyncio.gather(
+                        loop.run_in_executor(None, _claude_draft),
+                        loop.run_in_executor(None, lambda: gpt_p.generate_text(prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS)),
+                    )
                     content = await loop.run_in_executor(
-                        None,
-                        lambda: provider.generate_text(
-                            prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS,
-                            image=thumb_bytes, image_mime=thumb_mime,
-                        ),
+                        None, lambda: synthesize(c_text, g_text, "당근 광고 성과 분석"),
                     )
                 else:
-                    content = await loop.run_in_executor(
-                        None,
-                        lambda: provider.generate_text(prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS),
-                    )
+                    provider = get_provider(engine)
+                    thumb_for_engine = thumb_bytes if engine == "claude" else None
+                    if thumb_for_engine:
+                        # Multi-modal call (Claude CLI stream-json)
+                        content = await loop.run_in_executor(
+                            None,
+                            lambda: provider.generate_text(
+                                prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS,
+                                image=thumb_for_engine, image_mime=thumb_mime,
+                            ),
+                        )
+                    else:
+                        content = await loop.run_in_executor(
+                            None,
+                            lambda: provider.generate_text(prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS),
+                        )
                 sections = parse_analysis_sections(content)
                 state["ai_sections"] = sections
                 state["ai_raw"] = content

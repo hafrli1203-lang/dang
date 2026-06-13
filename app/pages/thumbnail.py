@@ -185,9 +185,9 @@ def thumbnail_page() -> None:
         status_label.set_text("썸네일을 만들고 있어요...")
 
         try:
-            from app.ai.providers import GeminiProvider
+            from app.ai.providers import OpenAIProvider
 
-            provider = GeminiProvider()
+            provider = OpenAIProvider()
             loop = asyncio.get_running_loop()
             ref = page_state["ref_bytes"]
             ref_mime = page_state["ref_mime"]

@@ -68,7 +68,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 var
   EnvPage: TWizardPage;
   AnthropicKeyEdit: TNewEdit;
-  GeminiKeyEdit: TNewEdit;
+  OpenaiKeyEdit: TNewEdit;
 
 procedure InitializeWizard;
 begin
@@ -98,17 +98,17 @@ begin
     Text := '';
   end;
 
-  { Gemini API Key }
+  { OpenAI API Key }
   with TNewStaticText.Create(EnvPage) do
   begin
     Parent := EnvPage.Surface;
-    Caption := 'Google Gemini API Key:';
+    Caption := 'OpenAI API Key (GPT / 이미지):';
     Left := 0;
     Top := 72;
   end;
 
-  GeminiKeyEdit := TNewEdit.Create(EnvPage);
-  with GeminiKeyEdit do
+  OpenaiKeyEdit := TNewEdit.Create(EnvPage);
+  with OpenaiKeyEdit do
   begin
     Parent := EnvPage.Surface;
     Left := 0;
@@ -144,11 +144,12 @@ begin
       '# API 키를 입력하세요. 최소 1개 이상 필요합니다.' + #13#10 +
       #13#10 +
       'ANTHROPIC_API_KEY=' + AnthropicKeyEdit.Text + #13#10 +
-      'GEMINI_API_KEY=' + GeminiKeyEdit.Text + #13#10 +
+      'OPENAI_API_KEY=' + OpenaiKeyEdit.Text + #13#10 +
       #13#10 +
       '# 모델 설정 (기본값 사용 시 비워두세요)' + #13#10 +
       '# CLAUDE_MODEL=claude-opus-4-6' + #13#10 +
-      '# GEMINI_MODEL=gemini-2.5-pro-preview-05-06' + #13#10 +
+      '# OPENAI_MODEL=gpt-4o' + #13#10 +
+      '# OPENAI_IMAGE_MODEL=gpt-image-2' + #13#10 +
       #13#10 +
       '# NiceGUI 저장소 암호' + #13#10 +
       'STORAGE_SECRET=daangn-reporter-secret-' + GetDateTimeString('yyyymmdd', #0, #0) + #13#10;
@@ -156,7 +157,7 @@ begin
     { 기존 .env가 있으면 덮어쓰지 않음 }
     if not FileExists(EnvPath) then
       SaveStringToFile(EnvPath, EnvContent, False)
-    else if (AnthropicKeyEdit.Text <> '') or (GeminiKeyEdit.Text <> '') then
+    else if (AnthropicKeyEdit.Text <> '') or (OpenaiKeyEdit.Text <> '') then
       { 키를 입력한 경우에만 새로 저장 }
       SaveStringToFile(EnvPath, EnvContent, False);
   end;

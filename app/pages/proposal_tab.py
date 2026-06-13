@@ -20,7 +20,7 @@ from app.ai_engine import (
     _PROPOSAL_SECTION_NAMES,
     _PROPOSAL_SECTION_KEYS,
 )
-from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
+from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.ai.news_post_guard import _split_blocks
 from app.database import (
     get_project,
@@ -136,7 +136,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                 ui.icon("smart_toy", size="20px").style("color: var(--dg-primary)")
                 ui.label("AI 엔진").style("font-weight: 600; color: var(--dg-text-primary)")
                 engine_radio = ui.radio(
-                    {"claude": "Claude", "gemini": "Gemini", "both": "둘 다 (비교)"},
+                    {"claude": "Claude", "gpt": "GPT", "coordinate": "Claude+GPT 조율"},
                     value="claude",
                 ).props("inline").classes("dg-radio")
 
@@ -229,24 +229,26 @@ def build_proposal_tab() -> None:  # noqa: C901
                 loop = asyncio.get_running_loop()
                 content = ""
 
-                if engine == "both":
-                    progress_label.set_text("Claude와 Gemini가 동시에 작성하고 있어요...")
-                    claude_p = ClaudeProvider()
-                    gemini_p = GeminiProvider()
+                if engine == "coordinate":
+                    from app.ai.coordination import synthesize
+                    progress_label.set_text("Claude와 GPT가 각자 초안을 쓰고 있어요...")
+                    claude_p = get_provider("claude")
+                    gpt_p = OpenAIProvider()
                     c_text, g_text = await asyncio.gather(
                         loop.run_in_executor(
                             None, lambda: claude_p.generate_text(prompt, system_prompt=guide)
                         ),
                         loop.run_in_executor(
-                            None, lambda: gemini_p.generate_text(prompt, system_prompt=guide)
+                            None, lambda: gpt_p.generate_text(prompt, system_prompt=guide)
                         ),
                     )
-                    content = (
-                        f"## [Claude 결과]\n\n{c_text}\n\n"
-                        f"---\n\n## [Gemini 결과]\n\n{g_text}"
+                    progress_label.set_text("Claude가 두 초안을 종합하고 있어요...")
+                    content = await loop.run_in_executor(
+                        None, lambda: synthesize(c_text, g_text, "운영 제안서")
                     )
                 else:
-                    progress_label.set_text(f"{engine.capitalize()}가 제안서를 작성하고 있어요...")
+                    engine_name = "GPT" if engine == "gpt" else "Claude"
+                    progress_label.set_text(f"{engine_name}가 제안서를 작성하고 있어요...")
                     provider = get_provider(engine)
                     chunk_queue: queue.Queue[str | None] = queue.Queue()
                     accumulated = ""
@@ -321,7 +323,7 @@ def build_proposal_tab() -> None:  # noqa: C901
 
         async def _regen_section(section_key: str, feedback: str = "") -> None:
             engine = engine_radio.value
-            if engine == "both":
+            if engine == "coordinate":
                 engine = "claude"
 
             shop_info = {

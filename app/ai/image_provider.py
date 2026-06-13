@@ -1,12 +1,16 @@
-﻿"""Gemini native image generation provider (Nano Banana).
+"""OpenAI image generation provider (gpt-image-2).
 
-Dedicated image generation class with support for:
+High-level image generation with support for:
 - Style Fusion (reference images + text)
 - Image Mapping (product + benchmark images)
-- Configurable aspect ratio and image size
+- Configurable aspect ratio / size
+
+gpt-image-2 returns base64 PNG. Multiple input images are supported via images.edit.
 """
 from __future__ import annotations
 
+import base64
+import io
 import os
 from io import BytesIO
 
@@ -15,16 +19,27 @@ from app.ai.providers import retry_api_call
 
 _log = get_logger("image_provider")
 
+# aspect_ratio → gpt-image 지원 size 매핑 (gpt-image-2/1.5/1 공통 지원 사이즈)
+_ASPECT_TO_SIZE = {
+    "1:1": "1024x1024",
+    "4:3": "1536x1024",
+    "3:2": "1536x1024",
+    "16:9": "1536x1024",
+    "3:4": "1024x1536",
+    "2:3": "1024x1536",
+    "9:16": "1024x1536",
+}
 
-class GeminiImageProvider:
-    """High-level Gemini image generation via google-genai SDK.
 
-    Unlike GeminiProvider.generate_image() in providers.py (which returns raw bytes),
-    this class returns PIL.Image objects and supports multiple input images,
-    aspect_ratio, and image_size configuration.
+class OpenAIImageProvider:
+    """High-level OpenAI image generation via the official openai SDK.
+
+    Unlike OpenAIProvider.generate_image() in providers.py (which returns raw
+    bytes for the simple thumbnail path), this class returns PIL.Image objects
+    and supports multiple input images and aspect_ratio.
     """
 
-    DEFAULT_MODEL = "gemini-3-pro-image-preview"
+    DEFAULT_MODEL = "gpt-image-2"
 
     def __init__(
         self,
@@ -32,21 +47,28 @@ class GeminiImageProvider:
         model: str | None = None,
     ) -> None:
         try:
-            from google import genai
+            from openai import OpenAI
         except ImportError:
             raise ImportError(
-                "google-genai 패키지가 설치되지 않았습니다. "
-                "pip install google-genai 를 실행해주세요."
+                "openai 패키지가 설치되지 않았습니다. "
+                "pip install openai 를 실행해주세요."
             ) from None
 
-        self._api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         if not self._api_key:
             raise ValueError(
-                "GEMINI_API_KEY is not set. "
+                "OPENAI_API_KEY is not set. "
                 "Add it to your .env file or environment."
             )
-        self._model = model or os.getenv("GEMINI_IMAGE_MODEL", self.DEFAULT_MODEL)
-        self._client = genai.Client(api_key=self._api_key)
+        self._model = model or os.getenv("OPENAI_IMAGE_MODEL", self.DEFAULT_MODEL)
+        self._client = OpenAI(api_key=self._api_key)
+
+    def _resolve_size(self, aspect_ratio: str | None, image_size: str | None) -> str:
+        if image_size:
+            return image_size
+        if aspect_ratio and aspect_ratio in _ASPECT_TO_SIZE:
+            return _ASPECT_TO_SIZE[aspect_ratio]
+        return "1024x1024"
 
     def generate_image(
         self,
@@ -60,10 +82,10 @@ class GeminiImageProvider:
 
         Args:
             prompt: Full text prompt (use nanobanana_prompt builders).
-            images: List of (image_bytes, mime_type) tuples. These are sent
-                    as inline image parts in the content.
+            images: List of (image_bytes, mime_type) tuples sent as input images
+                    (uses images.edit when present).
             aspect_ratio: e.g. "1:1", "16:9", "9:16", "4:3", "3:4".
-            image_size: e.g. "1024x1024", "1536x1024" (if model supports).
+            image_size: explicit size like "1024x1024" (overrides aspect_ratio).
 
         Returns:
             PIL.Image.Image — the generated image.
@@ -72,89 +94,87 @@ class GeminiImageProvider:
             ValueError: API failure or no image in response.
             ImportError: Pillow not installed.
         """
-        from google.genai import types
         from PIL import Image
 
-        if images is None:
-            images = []
-
-        # Build contents: images first, then text prompt
-        contents: list = []
-        for img_data, mime_type in images:
-            contents.append(types.Part.from_bytes(data=img_data, mime_type=mime_type))
-        contents.append(prompt)
-
-        # Build config
-        config_kwargs: dict = {
-            "response_modalities": ["IMAGE", "TEXT"],
-        }
-
-        # image_generation_config for aspect_ratio / image_size if supported
-        image_config: dict = {}
-        if aspect_ratio:
-            image_config["aspect_ratio"] = aspect_ratio
-        if image_size:
-            image_config["image_size"] = image_size
-        if image_config:
-            try:
-                config_kwargs["image_generation_config"] = types.ImageGenerationConfig(
-                    **image_config
-                )
-            except AttributeError:
-                config_kwargs["image_generation_config"] = image_config
-
-        config = types.GenerateContentConfig(**config_kwargs)
+        size = self._resolve_size(aspect_ratio, image_size)
+        images = images or []
 
         try:
             _log.info(
-                "Gemini 이미지 생성 시작 (model=%s, images=%d, aspect=%s)",
-                self._model,
-                len(images),
-                aspect_ratio,
+                "OpenAI 이미지 생성 시작 (model=%s, images=%d, size=%s)",
+                self._model, len(images), size,
             )
-            response = retry_api_call(
-                lambda: self._client.models.generate_content(
-                    model=self._model,
-                    contents=contents,
-                    config=config,
-                ),
-                label="Gemini 썸네일",
-            )
-            _log.info("Gemini 이미지 생성 완료")
-        except Exception as exc:
-            _log.error("Gemini 이미지 생성 실패: %s", exc)
-            raise ValueError(f"Gemini 이미지 생성 실패: {exc}") from exc
-
-        # Extract image from response
-        if not response.candidates:
-            raise ValueError(
-                "Gemini 이미지 응답이 비어 있습니다. 프롬프트를 조정해주세요."
-            )
-
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                _log.info(
-                    "이미지 추출 성공: %s (%d bytes)",
-                    part.inline_data.mime_type,
-                    len(part.inline_data.data),
+            if images:
+                file_objs = []
+                for idx, (img_data, mime) in enumerate(images):
+                    ext = "png" if "png" in mime else (
+                        "jpg" if ("jpeg" in mime or "jpg" in mime) else "png"
+                    )
+                    buf = io.BytesIO(img_data)
+                    buf.name = f"input_{idx}.{ext}"
+                    file_objs.append(buf)
+                response = retry_api_call(
+                    lambda: self._client.images.edit(
+                        model=self._model,
+                        image=file_objs if len(file_objs) > 1 else file_objs[0],
+                        prompt=prompt,
+                        size=size,
+                        n=1,
+                    ),
+                    label="OpenAI 이미지(편집)",
                 )
-                return Image.open(BytesIO(part.inline_data.data))
+            else:
+                response = retry_api_call(
+                    lambda: self._client.images.generate(
+                        model=self._model,
+                        prompt=prompt,
+                        size=size,
+                        n=1,
+                    ),
+                    label="OpenAI 이미지",
+                )
+            _log.info("OpenAI 이미지 생성 완료")
+        except Exception as exc:
+            _log.error("OpenAI 이미지 생성 실패: %s", exc)
+            raise ValueError(f"OpenAI 이미지 생성 실패: {exc}") from exc
 
-        raise ValueError(
-            "Gemini 응답에 이미지가 포함되지 않았습니다. 다른 프롬프트를 시도해주세요."
-        )
+        if not response.data:
+            raise ValueError(
+                "OpenAI 이미지 응답이 비어 있습니다. 프롬프트를 조정해주세요."
+            )
+        b64 = response.data[0].b64_json
+        if not b64:
+            raise ValueError(
+                "OpenAI 응답에 이미지가 포함되지 않았습니다. 다른 프롬프트를 시도해주세요."
+            )
+        data = base64.b64decode(b64)
+        _log.info("이미지 추출 성공 (%d bytes)", len(data))
+        return Image.open(BytesIO(data))
 
 
 def get_image_failure_guide(error_msg: str) -> str:
     """이미지 생성 실패 시 프롬프트 개선 가이드를 반환."""
     msg = str(error_msg).lower()
 
-    if any(kw in msg for kw in ("safety", "blocked", "filter", "policy", "harmful")):
+    if any(kw in msg for kw in ("safety", "blocked", "filter", "policy", "content_policy", "harmful", "moderation")):
         return (
             "안전 필터가 이미지를 차단했어요. 이렇게 해 보세요.\n"
             "- 사람 얼굴, 실제 브랜드, 로고 묘사를 빼 주세요\n"
             "- 의료, 약품, 폭력 관련 묘사를 피해 주세요\n"
             "- 추상적이거나 일러스트 스타일로 바꿔 보세요"
+        )
+    if any(kw in msg for kw in ("api key", "api_key", "invalid_api_key", "unauthorized", "401", "verification", "verify")):
+        return (
+            "OpenAI API 키 또는 조직 인증에 문제가 있어요.\n"
+            "- .env의 OPENAI_API_KEY가 올바른지 확인해 주세요\n"
+            "- gpt-image는 OpenAI 콘솔에서 조직 인증(Organization Verification)이 필요할 수 있어요\n"
+            "- 결제 수단이 등록돼 있는지 확인해 주세요"
+        )
+    if any(kw in msg for kw in ("billing", "insufficient", "quota", "exceeded your current quota")):
+        return (
+            "OpenAI 사용 한도 또는 결제 문제로 생성하지 못했어요.\n"
+            "- OpenAI 콘솔에서 잔액/결제 수단을 확인해 주세요\n"
+            "- 사용 한도(rate limit)에 걸렸다면 잠시 후 다시 시도해 주세요"
         )
     if any(kw in msg for kw in ("이미지가 포함되지", "no image", "empty", "비어")):
         return (
@@ -163,7 +183,7 @@ def get_image_failure_guide(error_msg: str) -> str:
             "- 'photo of', 'illustration of' 같은 표현을 앞에 붙여 보세요\n"
             "- 프롬프트가 너무 짧다면 세부 내용을 더해 주세요"
         )
-    if any(kw in msg for kw in ("429", "rate", "limit", "resource_exhausted", "quota")):
+    if any(kw in msg for kw in ("429", "rate", "limit", "resource_exhausted")):
         return (
             "지금은 요청이 너무 많아 잠시 쉬어야 해요.\n"
             "- 1~2분 뒤에 다시 시도해 주세요\n"

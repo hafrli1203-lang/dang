@@ -56,3 +56,26 @@ python -m pytest app/ -q --tb=short   # 203 passed
   콘솔 안내 메시지 확인 필요. 근본 해결은 8000 점유 중인 다른 uvicorn 종료.
 - 예산 설계 카드는 Step 3 결과 생성 전 화면에만 노출 (재생성 시에는 기존 설계 텍스트 재사용)
 - ECharts는 NiceGUI 내장이라 오프라인 PyInstaller 빌드에 추가 의존성 없음 (빌드 재검증 권장)
+
+---
+
+## Gemini → OpenAI(GPT) 전환 + 조율 엔진 (2026-06-13)
+
+### 변경 요약
+- **Gemini 완전 제거**: `GeminiProvider`/`GeminiImageProvider` 삭제, `google-genai` 의존성 제거.
+- **OpenAI 신설**: `OpenAIProvider`(chat.completions + Images API), `OpenAIImageProvider`(gpt-image-2).
+- **이미지**: 썸네일이 `gpt-image-2`(공식 최신, b64_json) 사용. env `OPENAI_IMAGE_MODEL`로 교체 가능.
+- **조율(coordinate)**: `app/ai/coordination.py` — Claude·GPT 병렬 초안 → 종합 모델(Claude)이 1개로 병합.
+  엔진 선택지 `{Claude / GPT / Claude+GPT 조율}`, 기본 Claude(단일). 위자드 4스텝·분석·보고서·제안서 적용.
+- 빌드/설치 갱신: `requirements.txt`(openai), `daangn.spec`·`build.py` hiddenimports, `installer.iss` 키 입력란.
+
+### 필요 환경변수 (.env — 직접 추가 필요, 코드가 .env 안 건드림)
+- `OPENAI_API_KEY` (필수). `OPENAI_MODEL`(기본 gpt-4o), `OPENAI_IMAGE_MODEL`(기본 gpt-image-2),
+  `OPENAI_SYNTHESIS_ENGINE`(기본 claude) 선택.
+- gpt-image는 OpenAI 콘솔에서 조직 인증(Organization Verification)이 필요할 수 있음.
+
+### 검증
+- 214 tests passed (Gemini 테스트 → OpenAI/coordination 테스트로 교체, 순증 4).
+- Playwright: /planning 엔진 옵션 [Claude/GPT/조율] 확인, Gemini 잔존 0,
+  키 없는 상태에서 GPT 생성 시 "OPENAI_API_KEY가 없어요" 안내(크래시 없음) 확인.
+- 미검증(키 필요): 실제 GPT 텍스트 생성·gpt-image-2 이미지 생성·조율 종합 품질. OPENAI_API_KEY 추가 후 점검 필요.

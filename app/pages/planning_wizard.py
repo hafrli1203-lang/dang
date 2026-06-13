@@ -31,7 +31,7 @@ from app.ai_engine import (
     _WIZARD_PROPOSAL_SECTION_KEYS,
 )
 from app.ai.news_post_guard import _split_blocks
-from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
+from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.reporting.docx_report import build_planning_docx, build_proposal_docx
 from app.export_manager import ExportManager
 from app.database import (
@@ -461,14 +461,14 @@ def build_wizard_ui(
             ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value
 
         # Validate API key
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
             ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
-        if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
+        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
+            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s1_btn")
@@ -486,10 +486,18 @@ def build_wizard_ui(
         try:
             guide, prompt = build_strategy_prompt(project)
             loop = asyncio.get_running_loop()
-            provider = get_provider(engine)
-            content = await loop.run_in_executor(
-                None, lambda: provider.generate_text(prompt, system_prompt=guide),
-            )
+            if engine == "coordinate":
+                from app.ai.coordination import coordinate_generate
+                content = await coordinate_generate(
+                    loop, prompt, guide, "전략 분석",
+                    on_drafts=(lambda: status.set_text("Claude와 GPT가 각자 분석하고 있어요...")) if status else None,
+                    on_synth=(lambda: status.set_text("Claude가 두 분석을 종합하고 있어요...")) if status else None,
+                )
+            else:
+                provider = get_provider(engine)
+                content = await loop.run_in_executor(
+                    None, lambda: provider.generate_text(prompt, system_prompt=guide),
+                )
 
             _wizard_state["step1_content"] = content
             _wizard_state["step1_sections"] = parse_strategy_sections(content)
@@ -520,7 +528,7 @@ def build_wizard_ui(
         if not project:
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value if engine_radio.value not in ("both", "coordinate") else "claude"
 
         regen_spinner = _wizard_state.get("_regen_spinner")
         regen_status = _wizard_state.get("_regen_status")
@@ -832,8 +840,8 @@ def build_wizard_ui(
                 thumb_status.set_text("썸네일을 만들고 있어요...")
 
                 try:
-                    from app.ai.providers import GeminiProvider as _GeminiProvider
-                    provider = _GeminiProvider()
+                    from app.ai.providers import OpenAIProvider as _ImageProvider
+                    provider = _ImageProvider()
                     loop = asyncio.get_running_loop()
                     ref = _thumb_state["ref_bytes"]
                     ref_mime = _thumb_state["ref_mime"]
@@ -1067,14 +1075,14 @@ def build_wizard_ui(
                 cancel_btn.classes(remove="hidden")
 
                 # Validate API keys
-                if engine in ("claude", "both") and not os.getenv("ANTHROPIC_API_KEY", ""):
+                if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
                     ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
                     return
-                if engine in ("gemini", "both") and not os.getenv("GEMINI_API_KEY", ""):
-                    ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
+                if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
+                    ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
@@ -1085,7 +1093,7 @@ def build_wizard_ui(
                     strategy_ctx = _wizard_state.get("step1_content", "")
                     guide, prompt = build_planning_prompt(
                         project, extra, category=cat, strategy=strat,
-                        engine=engine if engine != "both" else "",
+                        engine=engine if engine not in ("both", "coordinate") else "",
                         strategy_context=strategy_ctx,
                     )
                     _custom = get_setting("custom_system_prompt")
@@ -1097,34 +1105,36 @@ def build_wizard_ui(
                         ui.notify("생성을 중단했어요.", type="warning")
                         return
 
-                    if engine == "both":
-                        _set_step("2/3 Claude와 Gemini가 동시에 작성하고 있어요...")
+                    if engine == "coordinate":
+                        from app.ai.coordination import synthesize
+                        _set_step("2/3 Claude와 GPT가 각자 초안을 쓰고 있어요...")
                         claude_guide, _ = build_planning_prompt(
                             project, extra, category=cat, strategy=strat, engine="claude",
                             strategy_context=strategy_ctx,
                         )
-                        gemini_guide, _ = build_planning_prompt(
-                            project, extra, category=cat, strategy=strat, engine="gemini",
+                        gpt_guide, _ = build_planning_prompt(
+                            project, extra, category=cat, strategy=strat, engine="gpt",
                             strategy_context=strategy_ctx,
                         )
                         if _custom:
                             claude_guide = _custom
-                            gemini_guide = _custom
-                        claude_p = ClaudeProvider()
-                        gemini_p = GeminiProvider()
+                            gpt_guide = _custom
+                        claude_p = get_provider("claude")
+                        gpt_p = OpenAIProvider()
                         c_text, g_text = await asyncio.gather(
                             loop.run_in_executor(None, lambda: claude_p.generate_text(prompt, system_prompt=claude_guide)),
-                            loop.run_in_executor(None, lambda: gemini_p.generate_text(prompt, system_prompt=gemini_guide)),
+                            loop.run_in_executor(None, lambda: gpt_p.generate_text(prompt, system_prompt=gpt_guide)),
                         )
                         if _s2["cancelled"]:
                             ui.notify("생성을 중단했어요.", type="warning")
                             return
-                        content = (
-                            f"## [Claude 결과]\n\n{c_text}\n\n"
-                            f"---\n\n## [Gemini 결과]\n\n{g_text}"
+                        _set_step("3/3 Claude가 두 초안을 종합하고 있어요...")
+                        content = await loop.run_in_executor(
+                            None, lambda: synthesize(c_text, g_text, "기획 콘텐츠 생성"),
                         )
                     else:
-                        _set_step(f"2/3 {engine.capitalize()}가 콘텐츠를 작성하고 있어요...")
+                        engine_name = "GPT" if engine == "gpt" else "Claude"
+                        _set_step(f"2/3 {engine_name}가 콘텐츠를 작성하고 있어요...")
                         provider = get_provider(engine)
                         content = await loop.run_in_executor(None, lambda: provider.generate_text(prompt, system_prompt=guide))
                         if _s2["cancelled"]:
@@ -1180,7 +1190,8 @@ def build_wizard_ui(
                     return
 
                 engine = engine_radio.value
-                if engine == "both":
+                # 재생성은 단일 모델로 처리(조율은 비용 큼) — 종합 엔진(claude)로 collapse
+                if engine == "coordinate":
                     engine = "claude"
 
                 regen_spinner = _wizard_state.get("_regen_s2_spinner")
@@ -1624,13 +1635,13 @@ def build_wizard_ui(
             ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value
 
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
             ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
-        if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
+        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
+            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s3_btn")
@@ -1653,10 +1664,18 @@ def build_wizard_ui(
                 budget_plan_context=_wizard_state.get("budget_plan_text", ""),
             )
             loop = asyncio.get_running_loop()
-            provider = get_provider(engine)
-            content = await loop.run_in_executor(
-                None, lambda: provider.generate_text(prompt, system_prompt=guide),
-            )
+            if engine == "coordinate":
+                from app.ai.coordination import coordinate_generate
+                content = await coordinate_generate(
+                    loop, prompt, guide, "광고 세팅 가이드",
+                    on_drafts=(lambda: status.set_text("Claude와 GPT가 각자 작성하고 있어요...")) if status else None,
+                    on_synth=(lambda: status.set_text("Claude가 두 초안을 종합하고 있어요...")) if status else None,
+                )
+            else:
+                provider = get_provider(engine)
+                content = await loop.run_in_executor(
+                    None, lambda: provider.generate_text(prompt, system_prompt=guide),
+                )
 
             _wizard_state["step3_content"] = content
             _wizard_state["step3_sections"] = parse_ad_settings_sections(content)
@@ -1684,7 +1703,7 @@ def build_wizard_ui(
         if not project:
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value if engine_radio.value not in ("both", "coordinate") else "claude"
 
         regen_spinner = _wizard_state.get("_regen_s3_spinner")
         regen_status = _wizard_state.get("_regen_s3_status")
@@ -1921,13 +1940,13 @@ def build_wizard_ui(
             ui.notify("프로젝트를 찾을 수 없어요. 프로젝트 페이지에서 다시 선택해 주세요.", type="negative")
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value
 
         if engine == "claude" and not os.getenv("ANTHROPIC_API_KEY", ""):
             ui.notify("Claude API 키가 아직 등록되지 않았어요. .env 파일에 ANTHROPIC_API_KEY를 추가해 주세요.", type="negative")
             return
-        if engine == "gemini" and not os.getenv("GEMINI_API_KEY", ""):
-            ui.notify("Gemini API 키가 아직 등록되지 않았어요. .env 파일에 GEMINI_API_KEY를 추가해 주세요.", type="negative")
+        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
+            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
             return
 
         btn = _wizard_state.get("_s4_btn")
@@ -1950,10 +1969,18 @@ def build_wizard_ui(
                 ad_settings_context=_wizard_state.get("step3_content", ""),
             )
             loop = asyncio.get_running_loop()
-            provider = get_provider(engine)
-            content = await loop.run_in_executor(
-                None, lambda: provider.generate_text(prompt, system_prompt=guide),
-            )
+            if engine == "coordinate":
+                from app.ai.coordination import coordinate_generate
+                content = await coordinate_generate(
+                    loop, prompt, guide, "운영 제안서",
+                    on_drafts=(lambda: status.set_text("Claude와 GPT가 각자 작성하고 있어요...")) if status else None,
+                    on_synth=(lambda: status.set_text("Claude가 두 초안을 종합하고 있어요...")) if status else None,
+                )
+            else:
+                provider = get_provider(engine)
+                content = await loop.run_in_executor(
+                    None, lambda: provider.generate_text(prompt, system_prompt=guide),
+                )
 
             _wizard_state["step4_content"] = content
             _wizard_state["step4_sections"] = parse_wizard_proposal_sections(content)
@@ -1981,7 +2008,7 @@ def build_wizard_ui(
         if not project:
             return
 
-        engine = engine_radio.value if engine_radio.value != "both" else "claude"
+        engine = engine_radio.value if engine_radio.value not in ("both", "coordinate") else "claude"
 
         regen_spinner = _wizard_state.get("_regen_s4_spinner")
         regen_status = _wizard_state.get("_regen_s4_status")

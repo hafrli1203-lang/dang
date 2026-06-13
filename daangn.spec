@@ -36,7 +36,7 @@ a = Analysis(
     datas=nicegui_datas + mpl_datas + docx_datas + project_datas,
     hiddenimports=nicegui_hiddenimports + [
         'anthropic',
-        'google.genai',
+        'openai',
         'openpyxl',
         'dotenv',
         'app.pages.project',

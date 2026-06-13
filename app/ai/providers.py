@@ -5,15 +5,15 @@ Each provider is a plain class; async wrapping (run_in_executor) is the caller's
 
 Usage:
     from app.ai.providers import get_provider
-    provider = get_provider("claude")          # or "gemini"
+    provider = get_provider("claude")          # or "gpt"
     text = provider.generate_text(prompt)      # blocking call
 
 Environment variables (all optional — keys raise ValueError at call time if missing):
     ANTHROPIC_API_KEY   — Anthropic secret key
     CLAUDE_MODEL        — model override  (default: claude-opus-4-6)
-    GEMINI_API_KEY      — Google GenAI key
-    GEMINI_MODEL        — model override  (default: gemini-3.1-pro-preview)
-    GEMINI_IMAGE_MODEL  — image generation model (default: gemini-2.5-flash-image)
+    OPENAI_API_KEY      — OpenAI secret key
+    OPENAI_MODEL        — text model override  (default: gpt-4o)
+    OPENAI_IMAGE_MODEL  — image generation model (default: gpt-image-2)
 """
 from __future__ import annotations
 
@@ -205,87 +205,95 @@ class ClaudeProvider(BaseProvider):
             raise ValueError(f"Claude 스트리밍 실패: {exc}") from exc
 
 
-class GeminiProvider(BaseProvider):
-    """Google Gemini via google-genai SDK."""
+class OpenAIProvider(BaseProvider):
+    """OpenAI GPT via the official openai SDK (text + image).
 
-    DEFAULT_MODEL = "gemini-3.1-pro-preview"
-    DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
+    Text uses chat.completions; images use the Images API (gpt-image-2).
+    Signatures mirror the old GeminiProvider so callers are drop-in compatible.
+    """
+
+    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_IMAGE_MODEL = "gpt-image-2"
 
     def __init__(
         self,
         api_key: str | None = None,
         model: str | None = None,
+        max_tokens: int = 16384,
     ) -> None:
         try:
-            from google import genai
+            from openai import OpenAI
         except ImportError:
             raise ImportError(
-                "google-genai 패키지가 설치되지 않았습니다. "
-                "pip install google-genai 를 실행해주세요."
+                "openai 패키지가 설치되지 않았습니다. "
+                "pip install openai 를 실행해주세요."
             ) from None
 
-        self._api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         if not self._api_key:
             raise ValueError(
-                "GEMINI_API_KEY is not set. "
+                "OPENAI_API_KEY is not set. "
                 "Add it to your .env file or environment."
             )
-        self._model = model or os.getenv("GEMINI_MODEL", self.DEFAULT_MODEL)
-        self._client = genai.Client(api_key=self._api_key)
+        self._model = model or os.getenv("OPENAI_MODEL", self.DEFAULT_MODEL)
+        self._max_tokens = max_tokens
+        self._client = OpenAI(api_key=self._api_key)
+
+    def _messages(self, prompt: str, system_prompt: str | None) -> list[dict]:
+        messages: list[dict] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return messages
 
     def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
-        from google.genai import types
-        config_kwargs: dict = {"max_output_tokens": 16384}
-        if system_prompt:
-            config_kwargs["system_instruction"] = system_prompt
-        kwargs: dict = dict(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
         try:
-            _log.info("Gemini API 호출 시작 (model=%s)", self._model)
+            _log.info("OpenAI API 호출 시작 (model=%s)", self._model)
             response = retry_api_call(
-                lambda: self._client.models.generate_content(**kwargs),
-                label="Gemini",
+                lambda: self._client.chat.completions.create(
+                    model=self._model,
+                    max_completion_tokens=self._max_tokens,
+                    messages=self._messages(prompt, system_prompt),
+                ),
+                label="OpenAI",
             )
-            _log.info("Gemini API 호출 완료")
+            _log.info("OpenAI API 호출 완료")
         except Exception as exc:
-            _log.error("Gemini API 호출 실패: %s", exc)
+            _log.error("OpenAI API 호출 실패: %s", exc)
             if _is_overloaded(exc):
                 raise ValueError(
-                    "Gemini 서버가 지금 많이 붐비고 있어요. 잠시 후 다시 시도해 주세요."
+                    "OpenAI 서버가 지금 많이 붐비고 있어요. 잠시 후 다시 시도해 주세요."
                 ) from exc
-            raise ValueError(f"Gemini API 호출 실패: {exc}") from exc
-        text = response.text
+            raise ValueError(f"OpenAI API 호출 실패: {exc}") from exc
+        text = response.choices[0].message.content if response.choices else ""
         if not text:
-            _log.warning("Gemini 응답이 비어 있습니다 (model=%s)", self._model)
+            _log.warning("OpenAI 응답이 비어 있습니다 (model=%s)", self._model)
             raise ValueError(
-                "Gemini 응답이 비어 있습니다. 프롬프트를 조정하거나 다시 시도해주세요."
+                "OpenAI 응답이 비어 있습니다. 프롬프트를 조정하거나 다시 시도해주세요."
             )
         return text
 
     def generate_text_stream(
         self, prompt: str, *, system_prompt: str | None = None
     ) -> Generator[str, None, None]:
-        from google.genai import types
-        config_kwargs: dict = {"max_output_tokens": 16384}
-        if system_prompt:
-            config_kwargs["system_instruction"] = system_prompt
-        kwargs: dict = dict(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
         try:
-            _log.info("Gemini 스트리밍 시작 (model=%s)", self._model)
-            for chunk in self._client.models.generate_content_stream(**kwargs):
-                if chunk.text:
-                    yield chunk.text
-            _log.info("Gemini 스트리밍 완료")
+            _log.info("OpenAI 스트리밍 시작 (model=%s)", self._model)
+            stream = self._client.chat.completions.create(
+                model=self._model,
+                max_completion_tokens=self._max_tokens,
+                messages=self._messages(prompt, system_prompt),
+                stream=True,
+            )
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+            _log.info("OpenAI 스트리밍 완료")
         except Exception as exc:
-            _log.error("Gemini 스트리밍 실패: %s", exc)
-            raise ValueError(f"Gemini 스트리밍 실패: {exc}") from exc
+            _log.error("OpenAI 스트리밍 실패: %s", exc)
+            raise ValueError(f"OpenAI 스트리밍 실패: {exc}") from exc
 
     def generate_image(
         self,
@@ -294,55 +302,63 @@ class GeminiProvider(BaseProvider):
         reference_image: bytes | None = None,
         reference_mime: str = "image/png",
     ) -> tuple[bytes, str]:
-        """Generate an image using Gemini's image generation model.
+        """Generate an image using OpenAI's Images API (gpt-image-2).
 
         Args:
             prompt: Text description for image generation.
-            reference_image: Optional reference image bytes.
+            reference_image: Optional reference image bytes (uses images.edit).
             reference_mime: MIME type of the reference image.
 
         Returns:
-            Tuple of (image_bytes, mime_type).
+            Tuple of (image_bytes, "image/png").
 
         Raises:
             ValueError: If the API call fails or no image is in the response.
         """
-        from google.genai import types
+        import base64
+        import io
 
-        image_model = os.getenv("GEMINI_IMAGE_MODEL", self.DEFAULT_IMAGE_MODEL)
-
-        contents: list = []
-        if reference_image is not None:
-            contents.append(types.Part.from_bytes(data=reference_image, mime_type=reference_mime))
-        contents.append(prompt)
-
-        config = types.GenerateContentConfig(
-            response_modalities=["IMAGE", "TEXT"],
-        )
+        image_model = os.getenv("OPENAI_IMAGE_MODEL", self.DEFAULT_IMAGE_MODEL)
 
         try:
-            _log.info("Gemini 이미지 생성 시작 (model=%s)", image_model)
-            response = retry_api_call(
-                lambda: self._client.models.generate_content(
-                    model=image_model,
-                    contents=contents,
-                    config=config,
-                ),
-                label="Gemini 이미지",
-            )
-            _log.info("Gemini 이미지 생성 완료")
+            _log.info("OpenAI 이미지 생성 시작 (model=%s)", image_model)
+            if reference_image is not None:
+                ext = "png" if "png" in reference_mime else (
+                    "jpg" if ("jpeg" in reference_mime or "jpg" in reference_mime) else "png"
+                )
+                buf = io.BytesIO(reference_image)
+                buf.name = f"reference.{ext}"
+                response = retry_api_call(
+                    lambda: self._client.images.edit(
+                        model=image_model,
+                        image=buf,
+                        prompt=prompt,
+                        size="1024x1024",
+                        n=1,
+                    ),
+                    label="OpenAI 이미지(편집)",
+                )
+            else:
+                response = retry_api_call(
+                    lambda: self._client.images.generate(
+                        model=image_model,
+                        prompt=prompt,
+                        size="1024x1024",
+                        n=1,
+                    ),
+                    label="OpenAI 이미지",
+                )
+            _log.info("OpenAI 이미지 생성 완료")
         except Exception as exc:
-            _log.error("Gemini 이미지 생성 실패: %s", exc)
-            raise ValueError(f"Gemini 이미지 생성 실패: {exc}") from exc
+            _log.error("OpenAI 이미지 생성 실패: %s", exc)
+            raise ValueError(f"OpenAI 이미지 생성 실패: {exc}") from exc
 
-        # Extract image data from response parts
-        if not response.candidates:
-            raise ValueError("Gemini 이미지 응답이 비어 있습니다. 프롬프트를 조정해주세요.")
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                return (part.inline_data.data, part.inline_data.mime_type)
-
-        raise ValueError("Gemini 응답에 이미지가 포함되지 않았습니다. 다른 프롬프트를 시도해주세요.")
+        if not response.data:
+            raise ValueError("OpenAI 이미지 응답이 비어 있습니다. 프롬프트를 조정해주세요.")
+        b64 = response.data[0].b64_json
+        if not b64:
+            raise ValueError("OpenAI 응답에 이미지가 포함되지 않았습니다. 다른 프롬프트를 시도해주세요.")
+        return (base64.b64decode(b64), "image/png")
 
 
 class ClaudeCliProvider(BaseProvider):
@@ -539,11 +555,11 @@ class ClaudeCliProvider(BaseProvider):
 
 
 def get_provider(engine: str) -> BaseProvider:
-    """Factory: 'claude' | 'claude-api' | 'gemini' → instantiated provider.
+    """Factory: 'claude' | 'claude-api' | 'gpt' → instantiated provider.
 
     'claude' (default) uses the local `claude` CLI so the user's Claude Code
     subscription pays for the call. Set CLAUDE_BACKEND=api in the .env to
-    force the legacy Anthropic API path.
+    force the legacy Anthropic API path. 'gpt' uses the OpenAI API.
 
     Raises:
         ValueError: unknown engine name, or the required API key is missing.
@@ -557,10 +573,10 @@ def get_provider(engine: str) -> BaseProvider:
         return ClaudeProvider()
     elif engine == "claude-cli":
         return ClaudeCliProvider()
-    elif engine == "gemini":
-        return GeminiProvider()
+    elif engine == "gpt":
+        return OpenAIProvider()
     else:
         raise ValueError(
             f"Unknown engine {engine!r}. "
-            f"Valid values: 'claude', 'claude-cli', 'claude-api', 'gemini'."
+            f"Valid values: 'claude', 'claude-cli', 'claude-api', 'gpt'."
         )

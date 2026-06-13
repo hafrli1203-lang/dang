@@ -19,7 +19,7 @@ from app.database import (
     save_report_content,
 )
 from app.ai_engine import build_report_prompt, calc_kpi, SYSTEM_GUIDE_REPORT
-from app.ai.providers import get_provider, ClaudeProvider, GeminiProvider
+from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.reporting.docx_report import build_report_docx
 from app.reporting.parsers import parse_daangn_csv
 from app.chart_preview import make_charts
@@ -877,7 +877,7 @@ def report_page() -> None:
                 with ui.column().classes("gap-1"):
                     ui.label("AI 엔진").classes("dg-label-sm")
                     engine_radio = ui.radio(
-                        {"claude": "Claude", "gemini": "Gemini", "both": "둘 다 (비교)"},
+                        {"claude": "Claude", "gpt": "GPT", "coordinate": "Claude+GPT 조율"},
                         value="claude",
                     ).props("inline").classes("dg-radio")
                 with ui.column().classes("flex-1 gap-1"):
@@ -1175,25 +1175,27 @@ def report_page() -> None:
                     return
 
                 guide = SYSTEM_GUIDE_REPORT
-                if engine == "both":
-                    _set_step("2/4 Claude와 Gemini가 동시에 작성하고 있어요...")
-                    claude_p = ClaudeProvider()
-                    gemini_p = GeminiProvider()
+                if engine == "coordinate":
+                    from app.ai.coordination import synthesize
+                    _set_step("2/4 Claude와 GPT가 각자 초안을 쓰고 있어요...")
+                    claude_p = get_provider("claude")
+                    gpt_p = OpenAIProvider()
                     c_text, g_text = await asyncio.gather(
                         loop.run_in_executor(None, lambda: claude_p.generate_text(prompt, system_prompt=guide)),
-                        loop.run_in_executor(None, lambda: gemini_p.generate_text(prompt, system_prompt=guide)),
+                        loop.run_in_executor(None, lambda: gpt_p.generate_text(prompt, system_prompt=guide)),
                     )
                     if page_state["cancelled"]:
                         ui.notify("생성을 중단했어요.", type="warning")
                         return
-                    content = (
-                        f"## [Claude 결과]\n\n{c_text}\n\n"
-                        f"---\n\n## [Gemini 결과]\n\n{g_text}"
+                    _set_step("3/4 Claude가 두 초안을 종합하고 있어요...")
+                    content = await loop.run_in_executor(
+                        None, lambda: synthesize(c_text, g_text, "성과 분석 보고서"),
                     )
-                    page_state["c_text"] = c_text
-                    page_state["g_text"] = g_text
+                    page_state["c_text"] = ""
+                    page_state["g_text"] = ""
                 else:
-                    _set_step(f"2/4 {engine.capitalize()}가 보고서를 작성하고 있어요...")
+                    engine_name = "GPT" if engine == "gpt" else "Claude"
+                    _set_step(f"2/4 {engine_name}가 보고서를 작성하고 있어요...")
                     provider = get_provider(engine)
                     content = await loop.run_in_executor(None, lambda: provider.generate_text(prompt, system_prompt=guide))
                     if page_state["cancelled"]:

@@ -31,7 +31,7 @@ def compose_style_fusion_prompt(
     """Build a Style Fusion prompt (reference images + text overlay).
 
     The caller should pass reference images separately via
-    GeminiImageProvider.generate_image(images=[...]).
+    OpenAIImageProvider.generate_image(images=[...]).
 
     Args:
         width: Canvas width in pixels.
@@ -82,7 +82,7 @@ def compose_image_mapping_prompt(
     """Build an Image Mapping prompt (product photo + benchmark style).
 
     The caller should pass [product_image, *benchmark_images] via
-    GeminiImageProvider.generate_image(images=[...]).
+    OpenAIImageProvider.generate_image(images=[...]).
 
     Args:
         width: Canvas width in pixels.

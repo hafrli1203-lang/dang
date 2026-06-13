@@ -58,7 +58,7 @@ def build(onefile: bool = False, clean: bool = False) -> None:
     # ── Hidden imports ──────────────────────────────────────────────────
     hidden = [
         "anthropic",
-        "google.genai",
+        "openai",
         "openpyxl",
         "dotenv",
         "platformdirs",

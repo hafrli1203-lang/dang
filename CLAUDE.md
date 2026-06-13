@@ -75,12 +75,19 @@ python main.py   # http://localhost:8000
 ## Environment (.env)
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=AIza...
+OPENAI_API_KEY=sk-...
 CLAUDE_MODEL=claude-opus-4-6          # default
-GEMINI_MODEL=gemini-3.1-pro-preview   # default
-GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+OPENAI_MODEL=gpt-4o                   # default (텍스트)
+OPENAI_IMAGE_MODEL=gpt-image-2        # default (이미지)
+OPENAI_SYNTHESIS_ENGINE=claude        # 조율 종합 엔진 (default: claude)
 STORAGE_SECRET=...
 ```
+
+## AI 엔진 (Gemini 제거됨, 2026-06-13)
+- 텍스트: Claude(기본, CLI) / GPT(OpenAI) / **Claude+GPT 조율**(병렬 초안→종합)
+- 이미지: OpenAI `gpt-image-2` (썸네일). Gemini/google-genai 의존성 완전 제거.
+- 조율(coordinate): 콘텐츠 생성·분석·보고서·제안서·위자드 전 스텝에서 선택 가능.
+  `app/ai/coordination.py`의 `synthesize` / `coordinate_generate`.
 
 ## Tests
 ```bash

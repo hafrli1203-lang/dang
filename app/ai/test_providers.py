@@ -4,10 +4,10 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 try:
-    import google.genai  # noqa: F401
-    HAS_GOOGLE_GENAI = True
+    import openai  # noqa: F401
+    HAS_OPENAI = True
 except ImportError:
-    HAS_GOOGLE_GENAI = False
+    HAS_OPENAI = False
 
 
 class TestClaudeProvider(unittest.TestCase):
@@ -170,289 +170,207 @@ class TestClaudeProvider(unittest.TestCase):
         self.assertIn("Claude API 호출 실패", str(ctx.exception))
 
 
-@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
-class TestGeminiProvider(unittest.TestCase):
-    """GeminiProvider tests with mocked google-genai SDK."""
+@unittest.skipUnless(HAS_OPENAI, "openai not installed")
+class TestOpenAIProvider(unittest.TestCase):
+    """OpenAIProvider tests with mocked openai SDK."""
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_generate_text_returns_content(self, mock_client_cls):
-        """generate_text should return text from the Gemini response."""
+    def _mock_chat(self, mock_client, text):
+        msg = MagicMock()
+        msg.message.content = text
+        resp = MagicMock()
+        resp.choices = [msg]
+        mock_client.chat.completions.create.return_value = resp
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_generate_text_returns_content(self, mock_openai_cls):
+        """generate_text should return text from the chat completion."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        self._mock_chat(mock_client, "GPT가 작성한 기획서입니다.")
 
-        mock_response = MagicMock()
-        mock_response.text = "Gemini가 작성한 기획서입니다."
-        mock_client.models.generate_content.return_value = mock_response
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         result = provider.generate_text("기획서 작성해줘")
 
-        self.assertEqual(result, "Gemini가 작성한 기획서입니다.")
-        call_kwargs = mock_client.models.generate_content.call_args[1]
+        self.assertEqual(result, "GPT가 작성한 기획서입니다.")
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
         self.assertEqual(call_kwargs["model"], provider._model)
-        self.assertEqual(call_kwargs["contents"], "기획서 작성해줘")
+        self.assertEqual(call_kwargs["messages"][-1]["content"], "기획서 작성해줘")
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "key", "GEMINI_MODEL": "gemini-2.0-flash"})
-    @patch("google.genai.Client")
-    def test_respects_model_env_var(self, mock_client_cls):
-        """Should use GEMINI_MODEL env var when set."""
-        mock_client_cls.return_value = MagicMock()
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="key")
-        self.assertEqual(provider._model, "gemini-2.0-flash")
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_MODEL": "gpt-4.1"})
+    @patch("openai.OpenAI")
+    def test_respects_model_env_var(self, mock_openai_cls):
+        """Should use OPENAI_MODEL env var when set."""
+        mock_openai_cls.return_value = MagicMock()
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="key")
+        self.assertEqual(provider._model, "gpt-4.1")
 
     @patch.dict(os.environ, {}, clear=True)
     def test_raises_without_api_key(self):
-        """Should raise ValueError when GEMINI_API_KEY is missing."""
-        os.environ.pop("GEMINI_API_KEY", None)
-        from app.ai.providers import GeminiProvider
+        """Should raise ValueError when OPENAI_API_KEY is missing."""
+        os.environ.pop("OPENAI_API_KEY", None)
+        from app.ai.providers import OpenAIProvider
         with self.assertRaises(ValueError) as ctx:
-            GeminiProvider()
-        self.assertIn("GEMINI_API_KEY", str(ctx.exception))
+            OpenAIProvider()
+        self.assertIn("OPENAI_API_KEY", str(ctx.exception))
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_system_prompt_passed_as_config(self, mock_client_cls):
-        """system_prompt should be passed via GenerateContentConfig."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_system_prompt_passed_as_system_message(self, mock_openai_cls):
+        """system_prompt should be passed as the system message."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.text = "output"
-        mock_client.models.generate_content.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+        self._mock_chat(mock_client, "output")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         provider.generate_text("user prompt", system_prompt="내부 가이드")
 
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertEqual(call_kwargs["contents"], "user prompt")
-        self.assertIn("config", call_kwargs)
+        msgs = mock_client.chat.completions.create.call_args[1]["messages"]
+        self.assertEqual(msgs[0]["role"], "system")
+        self.assertEqual(msgs[0]["content"], "내부 가이드")
+        self.assertEqual(msgs[-1]["content"], "user prompt")
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_config_present_without_system_prompt(self, mock_client_cls):
-        """When system_prompt is None, config should still be present (max_output_tokens)."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_max_completion_tokens_in_request(self, mock_openai_cls):
+        """Request should set max_completion_tokens (not the deprecated max_tokens)."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.text = "ok"
-        mock_client.models.generate_content.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+        self._mock_chat(mock_client, "ok")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         provider.generate_text("prompt")
 
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertIn("config", call_kwargs)
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        self.assertEqual(call_kwargs["max_completion_tokens"], 16384)
 
     @patch("app.ai.providers.time.sleep")
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_api_error_wrapped_as_valueerror(self, mock_client_cls, _mock_sleep):
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_api_error_wrapped_as_valueerror(self, mock_openai_cls, _mock_sleep):
         """SDK/network exceptions should be wrapped as ValueError."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_client.models.generate_content.side_effect = RuntimeError("timeout")
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = RuntimeError("timeout")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         with self.assertRaises(ValueError) as ctx:
             provider.generate_text("prompt")
-        self.assertIn("Gemini API 호출 실패", str(ctx.exception))
+        self.assertIn("OpenAI API 호출 실패", str(ctx.exception))
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_empty_response_raises_valueerror(self, mock_client_cls):
-        """Empty/None response.text should raise ValueError with clear message."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_empty_response_raises_valueerror(self, mock_openai_cls):
+        """Empty content should raise ValueError with clear message."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.text = ""
-        mock_client.models.generate_content.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+        self._mock_chat(mock_client, "")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         with self.assertRaises(ValueError) as ctx:
             provider.generate_text("prompt")
         self.assertIn("비어 있습니다", str(ctx.exception))
 
 
-@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
-class TestGeminiStability(unittest.TestCase):
-    """Gemini 안정화 관련 테스트."""
+@unittest.skipUnless(HAS_OPENAI, "openai not installed")
+class TestOpenAIImageGeneration(unittest.TestCase):
+    """OpenAIProvider.generate_image tests with mocked openai SDK."""
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_gemini_max_output_tokens_in_config(self, mock_client_cls):
-        """generate_text() should include max_output_tokens=16384 in config."""
+    def _mock_image(self, mock_client, raw: bytes, *, edit=False):
+        import base64
+        item = MagicMock()
+        item.b64_json = base64.b64encode(raw).decode()
+        resp = MagicMock()
+        resp.data = [item]
+        target = mock_client.images.edit if edit else mock_client.images.generate
+        target.return_value = resp
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_generate_image_text_only(self, mock_openai_cls):
+        """Text-only prompt should produce (bytes, mime_type) tuple via images.generate."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_response = MagicMock()
-        mock_response.text = "result"
-        mock_client.models.generate_content.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+        self._mock_image(mock_client, b"\x89PNG_FAKE")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
-        provider.generate_text("prompt", system_prompt="guide")
-
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        config = call_kwargs["config"]
-        self.assertEqual(config.max_output_tokens, 16384)
-
-    def test_gemini_import_error_message(self):
-        """google-genai 미설치 시 친절한 ImportError 메시지를 보여줘야 한다."""
-        import sys
-        # Temporarily hide google.genai
-        saved = {}
-        for key in list(sys.modules.keys()):
-            if key == "google" or key.startswith("google."):
-                saved[key] = sys.modules.pop(key)
-        # Also block the import
-        import importlib
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "google" or name.startswith("google."):
-                raise ImportError("No module named 'google'")
-            return original_import(name, *args, **kwargs)
-
-        try:
-            import builtins
-            old_import = builtins.__import__
-            builtins.__import__ = mock_import
-            # Remove cached module
-            sys.modules.pop("app.ai.providers", None)
-
-            with self.assertRaises(ImportError) as ctx:
-                # Force re-import of GeminiProvider
-                from importlib import reload
-                import app.ai.providers as pmod
-                reload(pmod)
-                pmod.GeminiProvider(api_key="test-key")
-            self.assertIn("google-genai", str(ctx.exception))
-            self.assertIn("pip install", str(ctx.exception))
-        finally:
-            builtins.__import__ = old_import
-            sys.modules.update(saved)
-            # Re-import to restore module state
-            sys.modules.pop("app.ai.providers", None)
-
-
-@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
-class TestGeminiImageGeneration(unittest.TestCase):
-    """GeminiProvider.generate_image tests with mocked google-genai SDK."""
-
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_generate_image_text_only(self, mock_client_cls):
-        """Text-only prompt should produce (bytes, mime_type) tuple."""
-        mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-
-        mock_part = MagicMock()
-        mock_part.inline_data = MagicMock()
-        mock_part.inline_data.data = b"\x89PNG_FAKE"
-        mock_part.inline_data.mime_type = "image/png"
-        mock_candidate = MagicMock()
-        mock_candidate.content.parts = [mock_part]
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        mock_client.models.generate_content.return_value = mock_response
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         data, mime = provider.generate_image("당근마켓 광고 썸네일")
 
         self.assertEqual(data, b"\x89PNG_FAKE")
         self.assertEqual(mime, "image/png")
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertEqual(len(call_kwargs["contents"]), 1)  # text only
+        mock_client.images.generate.assert_called_once()
+        mock_client.images.edit.assert_not_called()
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_generate_image_with_reference(self, mock_client_cls):
-        """reference_image should add a Part to contents."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_generate_image_with_reference_uses_edit(self, mock_openai_cls):
+        """reference_image should route through images.edit."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        self._mock_image(mock_client, b"IMG", edit=True)
 
-        mock_part = MagicMock()
-        mock_part.inline_data = MagicMock()
-        mock_part.inline_data.data = b"IMG"
-        mock_part.inline_data.mime_type = "image/png"
-        mock_candidate = MagicMock()
-        mock_candidate.content.parts = [mock_part]
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        mock_client.models.generate_content.return_value = mock_response
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
+        data, mime = provider.generate_image(
+            "prompt", reference_image=b"REF_IMG", reference_mime="image/jpeg"
+        )
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
-        provider.generate_image("prompt", reference_image=b"REF_IMG", reference_mime="image/jpeg")
+        self.assertEqual(data, b"IMG")
+        mock_client.images.edit.assert_called_once()
+        mock_client.images.generate.assert_not_called()
 
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertEqual(len(call_kwargs["contents"]), 2)  # Part + text
-
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_no_image_in_response(self, mock_client_cls):
-        """Should raise ValueError when response has no inline_data."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_no_image_in_response(self, mock_openai_cls):
+        """Should raise ValueError when response data is empty."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        resp = MagicMock()
+        resp.data = []
+        mock_client.images.generate.return_value = resp
 
-        mock_part = MagicMock()
-        mock_part.inline_data = None  # no image
-        mock_candidate = MagicMock()
-        mock_candidate.content.parts = [mock_part]
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        mock_client.models.generate_content.return_value = mock_response
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         with self.assertRaises(ValueError) as ctx:
             provider.generate_image("prompt")
-        self.assertIn("이미지가 포함되지 않았습니다", str(ctx.exception))
+        self.assertIn("비어 있습니다", str(ctx.exception))
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "key", "GEMINI_IMAGE_MODEL": "gemini-custom-image"})
-    @patch("google.genai.Client")
-    def test_respects_image_model_env_var(self, mock_client_cls):
-        """Should use GEMINI_IMAGE_MODEL env var when set."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_IMAGE_MODEL": "gpt-image-custom"})
+    @patch("openai.OpenAI")
+    def test_respects_image_model_env_var(self, mock_openai_cls):
+        """Should use OPENAI_IMAGE_MODEL env var when set."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        self._mock_image(mock_client, b"IMG")
 
-        mock_part = MagicMock()
-        mock_part.inline_data = MagicMock()
-        mock_part.inline_data.data = b"IMG"
-        mock_part.inline_data.mime_type = "image/png"
-        mock_candidate = MagicMock()
-        mock_candidate.content.parts = [mock_part]
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        mock_client.models.generate_content.return_value = mock_response
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="key")
         provider.generate_image("prompt")
 
-        call_kwargs = mock_client.models.generate_content.call_args[1]
-        self.assertEqual(call_kwargs["model"], "gemini-custom-image")
+        call_kwargs = mock_client.images.generate.call_args[1]
+        self.assertEqual(call_kwargs["model"], "gpt-image-custom")
 
     @patch("app.ai.providers.time.sleep")
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"})
-    @patch("google.genai.Client")
-    def test_api_error_wrapped(self, mock_client_cls, _mock_sleep):
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"})
+    @patch("openai.OpenAI")
+    def test_api_error_wrapped(self, mock_openai_cls, _mock_sleep):
         """SDK exceptions should be wrapped as ValueError."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
-        mock_client.models.generate_content.side_effect = RuntimeError("network error")
+        mock_openai_cls.return_value = mock_client
+        mock_client.images.generate.side_effect = RuntimeError("network error")
 
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-gemini-key")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-openai-key")
         with self.assertRaises(ValueError) as ctx:
             provider.generate_image("prompt")
-        self.assertIn("Gemini 이미지 생성 실패", str(ctx.exception))
+        self.assertIn("OpenAI 이미지 생성 실패", str(ctx.exception))
 
 
 class TestGetProvider(unittest.TestCase):
@@ -489,15 +407,15 @@ class TestGetProvider(unittest.TestCase):
         provider = get_provider("claude-api")
         self.assertIsInstance(provider, ClaudeProvider)
 
-    @unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "key"})
-    @patch("google.genai.Client")
-    def test_returns_gemini_provider(self, mock_cls):
-        """get_provider('gemini') should return GeminiProvider."""
+    @unittest.skipUnless(HAS_OPENAI, "openai not installed")
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "key"})
+    @patch("openai.OpenAI")
+    def test_returns_openai_provider(self, mock_cls):
+        """get_provider('gpt') should return OpenAIProvider."""
         mock_cls.return_value = MagicMock()
-        from app.ai.providers import get_provider, GeminiProvider
-        provider = get_provider("gemini")
-        self.assertIsInstance(provider, GeminiProvider)
+        from app.ai.providers import get_provider, OpenAIProvider
+        provider = get_provider("gpt")
+        self.assertIsInstance(provider, OpenAIProvider)
 
     def test_raises_on_unknown_engine(self):
         """get_provider with unknown name should raise ValueError."""
@@ -639,48 +557,47 @@ class TestClaudeProviderStream(unittest.TestCase):
         self.assertIn("스트리밍 실패", str(ctx.exception))
 
 
-@unittest.skipUnless(HAS_GOOGLE_GENAI, "google-genai not installed")
-class TestGeminiProviderStream(unittest.TestCase):
-    """GeminiProvider.generate_text_stream() tests."""
+@unittest.skipUnless(HAS_OPENAI, "openai not installed")
+class TestOpenAIProviderStream(unittest.TestCase):
+    """OpenAIProvider.generate_text_stream() tests."""
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key-456"})
-    @patch("google.genai.Client")
-    def test_stream_yields_chunks(self, mock_client_cls):
-        """generate_text_stream should yield text chunks from Gemini stream."""
+    @staticmethod
+    def _chunk(text):
+        c = MagicMock()
+        delta = MagicMock()
+        delta.content = text
+        choice = MagicMock()
+        choice.delta = delta
+        c.choices = [choice]
+        return c
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-456"})
+    @patch("openai.OpenAI")
+    def test_stream_yields_chunks(self, mock_openai_cls):
+        """generate_text_stream should yield delta tokens from the stream."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = iter(
+            [self._chunk("제안서 "), self._chunk("작성 중"), self._chunk("입니다.")]
+        )
 
-        # Mock stream chunks
-        chunk1 = MagicMock()
-        chunk1.text = "제안서 "
-        chunk2 = MagicMock()
-        chunk2.text = "작성 중"
-        chunk3 = MagicMock()
-        chunk3.text = "입니다."
-        mock_client.models.generate_content_stream.return_value = iter([chunk1, chunk2, chunk3])
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-key-456")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-key-456")
         chunks = list(provider.generate_text_stream("테스트"))
         self.assertEqual(chunks, ["제안서 ", "작성 중", "입니다."])
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key-456"})
-    @patch("google.genai.Client")
-    def test_stream_skips_empty_chunks(self, mock_client_cls):
-        """generate_text_stream should skip chunks with no text."""
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key-456"})
+    @patch("openai.OpenAI")
+    def test_stream_skips_empty_chunks(self, mock_openai_cls):
+        """generate_text_stream should skip chunks with empty delta content."""
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = iter(
+            [self._chunk("내용"), self._chunk(None), self._chunk("추가")]
+        )
 
-        chunk1 = MagicMock()
-        chunk1.text = "내용"
-        chunk2 = MagicMock()
-        chunk2.text = ""
-        chunk3 = MagicMock()
-        chunk3.text = "추가"
-        mock_client.models.generate_content_stream.return_value = iter([chunk1, chunk2, chunk3])
-
-        from app.ai.providers import GeminiProvider
-        provider = GeminiProvider(api_key="test-key-456")
+        from app.ai.providers import OpenAIProvider
+        provider = OpenAIProvider(api_key="test-key-456")
         chunks = list(provider.generate_text_stream("test"))
         self.assertEqual(chunks, ["내용", "추가"])
 
