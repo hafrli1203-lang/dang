@@ -566,6 +566,93 @@ def check_auto_manual_pairing(
     return gaps
 
 
+# 페어 CPA 차이가 이 비율 미만이면 '비슷함(안정화 중)'으로 본다.
+_PAIR_TIE_THRESHOLD = 0.10
+
+
+@dataclass(frozen=True)
+class PairComparison:
+    """동일 조건(연령+소재)의 수동/자동 페어 head-to-head 비교."""
+
+    creative_key: str
+    age_range: str
+    manual: CampaignPerf
+    auto: CampaignPerf
+
+    @property
+    def winner(self) -> Literal["manual", "auto", "tie"]:
+        m, a = self.manual, self.auto
+        # 행동이 없는 쪽은 효율 판단 불가 → 행동 있는 쪽 우위.
+        if m.actions == 0 and a.actions == 0:
+            return "tie"
+        if m.actions == 0:
+            return "auto"
+        if a.actions == 0:
+            return "manual"
+        lo = min(m.cpa, a.cpa)
+        if lo <= 0 or abs(m.cpa - a.cpa) / lo < _PAIR_TIE_THRESHOLD:
+            return "tie"
+        return "manual" if m.cpa < a.cpa else "auto"
+
+    @property
+    def cpa_gap_pct(self) -> float:
+        """두 모드 CPA 차이 비율(%). 한쪽이라도 CPA가 없으면 0."""
+        m, a = self.manual.cpa, self.auto.cpa
+        lo = min(m, a)
+        if m <= 0 or a <= 0 or lo <= 0:
+            return 0.0
+        return abs(m - a) / lo * 100
+
+    @property
+    def recommendation(self) -> str:
+        gap = self.cpa_gap_pct
+        if self.winner == "manual":
+            return (
+                f"수동이 CPA {gap:.0f}% 더 효율적이에요. 수동이 안정화된 단계라면 "
+                "자동을 종료하고 수동에 집중하는 걸 검토해보세요."
+            )
+        if self.winner == "auto":
+            return (
+                f"자동이 CPA {gap:.0f}% 더 효율적이에요. 수동 비중을 줄이고 자동 위주로 "
+                "확장하는 걸 검토해보세요."
+            )
+        return (
+            "두 모드 효율이 비슷해요. 아직 안정화 중이니 페어를 유지하며 조금 더 "
+            "지켜보세요. (변수는 입찰 모드 하나만 다르게 통제)"
+        )
+
+
+def compare_auto_manual_pairs(
+    campaigns: Sequence[CampaignPerf],
+) -> list[PairComparison]:
+    """수동·자동이 모두 존재하는 페어(같은 연령+소재)를 head-to-head로 비교.
+
+    누락 페어는 제외(그건 check_auto_manual_pairing이 담당). 비용이 있는 캠페인만 대상.
+    CPA가 좋은(낮은) 쪽이 더 위에 오도록, 효율 격차가 큰 페어부터 정렬해 반환한다.
+    """
+    campaigns = [c for c in campaigns if c.cost > 0 and c.bid_mode in ("auto", "manual")]
+
+    def _key(c: CampaignPerf) -> tuple[str, str]:
+        return (c.age_range, c.creative_id)
+
+    manual = {_key(c): c for c in campaigns if c.bid_mode == "manual"}
+    auto = {_key(c): c for c in campaigns if c.bid_mode == "auto"}
+
+    pairs = [
+        PairComparison(
+            creative_key=key[1] or m.name,
+            age_range=key[0],
+            manual=m,
+            auto=auto[key],
+        )
+        for key, m in manual.items()
+        if key in auto
+    ]
+    # 효율 격차 큰 페어 우선 (의사결정 임팩트 순).
+    pairs.sort(key=lambda p: p.cpa_gap_pct, reverse=True)
+    return pairs
+
+
 # ───────────────────────── xlsx parser ─────────────────────────
 
 
@@ -596,6 +683,7 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
     result: dict[str, list] = {"genders": [], "ages": [], "campaigns": []}
     period_first: str | None = None
     period_last: str | None = None
+    age_gender_accum: dict[tuple[str, str], dict[str, int]] = {}
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -610,11 +698,12 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
 
         # Try breakdown format first (single-sheet long-format)
         if _is_breakdown_format(header):
-            ages, campaigns, p_first, p_last = _aggregate_breakdown(
-                header, rows[header_idx + 1 :]
-            )
+            data_rows = rows[header_idx + 1 :]
+            ages, campaigns, p_first, p_last = _aggregate_breakdown(header, data_rows)
             result["ages"].extend(ages)
             result["campaigns"].extend(campaigns)
+            # 성별 컬럼이 있으면 (연령 × 성별) 조인 셀도 누적 (히트맵용).
+            _accumulate_age_gender(header, data_rows, age_gender_accum)
             if p_first and (period_first is None or p_first < period_first):
                 period_first = p_first
             if p_last and (period_last is None or p_last > period_last):
@@ -674,6 +763,7 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
                 )
                 result["genders" if kind == "gender" else "ages"].append(seg)
 
+    result["age_gender_cells"] = _finalize_age_gender(age_gender_accum)
     result["meta"] = {
         "period_first": period_first or "",
         "period_last": period_last or "",
@@ -943,6 +1033,93 @@ def _aggregate_breakdown(
         )
 
     return ages, campaigns, period_first, period_last
+
+
+# ───────────────────── age × gender joint (heatmap) ─────────────────────
+
+
+@dataclass(frozen=True)
+class AgeGenderCell:
+    """A joint (연령 × 성별) cell aggregated from breakdown rows."""
+
+    age: str
+    gender: str
+    cost: int = 0
+    actions: int = 0
+    impressions: int = 0
+    clicks: int = 0
+
+    @property
+    def cpa(self) -> float:
+        return self.cost / self.actions if self.actions else 0.0
+
+    @property
+    def ctr(self) -> float:
+        return (self.clicks / self.impressions * 100) if self.impressions else 0.0
+
+
+def _gender_sort_key(label: str) -> tuple[int, str]:
+    """남성 → 여성 → 기타 순으로 정렬."""
+    order = {"남성": 0, "남": 0, "여성": 1, "여": 1}
+    return (order.get(label.strip(), 2), label)
+
+
+def _accumulate_age_gender(
+    header: list[str], data_rows: list[tuple], accum: dict[tuple[str, str], dict[str, int]]
+) -> None:
+    """breakdown 행에서 (연령, 성별) 조인 셀을 accum에 누적(in-place).
+
+    성별 컬럼이 없으면 아무것도 하지 않는다(조인 불가 → 히트맵 미생성).
+    """
+    col_age = _find_breakdown_col(header, "연령")
+    col_gender = _find_breakdown_col(header, "성별")
+    col_cost = _find_breakdown_col(header, "비용")
+    col_imp = _find_breakdown_col(header, "노출")
+    col_click = _find_breakdown_col(header, "클릭 수", "클릭수")
+    action_cols = [
+        idx for idx, h in enumerate(header)
+        if any(kw.replace(" ", "") in h.replace(" ", "") for kw in _ACTION_KEYWORDS)
+        and "CPA" not in h and "CVR" not in h and "비용" not in h
+    ]
+    if col_age is None or col_gender is None or col_cost is None:
+        return
+
+    skip = {"합계", "Total", "소계", "전체", "알 수 없음"}
+    for row in data_rows:
+        if not row or all(c is None or str(c).strip() == "" for c in row):
+            continue
+        age = _cell_str(row, col_age)
+        gender = _cell_str(row, col_gender)
+        if not age or not gender or age in skip or gender in skip:
+            continue
+        acc = accum.setdefault(
+            (age, gender), {"cost": 0, "actions": 0, "impressions": 0, "clicks": 0}
+        )
+        acc["cost"] += _cell_int(row, col_cost)
+        acc["impressions"] += _cell_int(row, col_imp) if col_imp is not None else 0
+        acc["clicks"] += _cell_int(row, col_click) if col_click is not None else 0
+        acc["actions"] += sum(_cell_int(row, c) for c in action_cols)
+
+
+def _finalize_age_gender(accum: dict[tuple[str, str], dict[str, int]]) -> dict:
+    """누적 dict을 {cells, ages, genders} 렌더 구조로 마감."""
+    cells = [
+        AgeGenderCell(age=age, gender=gender, **vals)
+        for (age, gender), vals in accum.items()
+    ]
+    ages = sorted({c.age for c in cells}, key=_age_sort_key)
+    genders = sorted({c.gender for c in cells}, key=_gender_sort_key)
+    return {"cells": cells, "ages": ages, "genders": genders}
+
+
+def aggregate_age_gender_cells(header: list[str], data_rows: list[tuple]) -> dict:
+    """breakdown 시트에서 (연령 × 성별) 조인 셀을 집계해 {cells, ages, genders} 반환.
+
+    성별 컬럼이 없으면 빈 결과({cells: [], ...})를 반환한다.
+    """
+    accum: dict[tuple[str, str], dict[str, int]] = {}
+    _accumulate_age_gender(header, data_rows, accum)
+    return _finalize_age_gender(accum)
 
 
 def _normalize_period_cell(row: tuple, idx: int | None) -> str:

@@ -28,6 +28,7 @@ from app.reporting.demographic import (
     calc_funnel,
     check_auto_manual_pairing,
     check_variable_control,
+    compare_auto_manual_pairs,
     group_ages_by_cpa,
     judge_campaigns,
     parse_demographic_xlsx,
@@ -46,6 +47,7 @@ from app.ai_engine import (
     parse_analysis_sections,
 )
 from app.ai.providers import get_provider, OpenAIProvider
+from app.ai.output_validator import repair_output, get_schema
 from app.theme import section_header
 
 _log = logging.getLogger("analysis")
@@ -61,6 +63,31 @@ _VERDICT_BADGE = {
 
 def _fmt_won(v: float | int) -> str:
     return f"{int(round(v)):,}원"
+
+
+# 히트맵 CPA 색상 램프 (차분한 톤: 좋음=연한 테라코타, 나쁨=진한 테라코타). 원색 금지.
+_HEAT_LOW = (251, 237, 224)   # #FBEDE0 낮은 CPA(좋음)
+_HEAT_HIGH = (176, 79, 47)    # #B04F2F 높은 CPA(나쁨)
+
+
+def _lerp_hex(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> str:
+    """두 RGB를 t∈[0,1]로 선형 보간한 #rrggbb 반환."""
+    t = 0.0 if t < 0 else 1.0 if t > 1 else t
+    r, g, b = (round(a + (b_ - a) * t) for a, b_ in zip(c1, c2))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _cpa_heat_style(cpa: float, lo: float, hi: float) -> tuple[str, str]:
+    """CPA → (배경색, 글자색). lo=가장 좋은(낮은) CPA, hi=가장 나쁜(높은) CPA.
+
+    actions=0 등으로 cpa<=0이면 중립 회색을 반환한다.
+    """
+    if cpa <= 0:
+        return ("#F1F3F7", "#9AA3B2")
+    t = 0.0 if hi <= lo else (cpa - lo) / (hi - lo)
+    bg = _lerp_hex(_HEAT_LOW, _HEAT_HIGH, t)
+    fg = "#FFFFFF" if t > 0.6 else "#1A1A2E"
+    return (bg, fg)
 
 
 def _strip_filename(fn: str) -> str:
@@ -486,6 +513,7 @@ def analysis_page() -> None:
                 priority = build_priority_checklist(judgments, ages=ages)
                 var_warnings = check_variable_control(campaigns)
                 pair_gaps = check_auto_manual_pairing(campaigns)
+                pair_comparisons = compare_auto_manual_pairs(campaigns)
 
                 # Funnel + economics
                 funnel = calc_funnel(ages) if ages else calc_funnel(campaigns)
@@ -504,6 +532,7 @@ def analysis_page() -> None:
                 state["priority"] = priority
                 state["var_warnings"] = var_warnings
                 state["pair_gaps"] = pair_gaps
+                state["pair_comparisons"] = pair_comparisons
                 state["funnel"] = funnel
                 state["economics"] = economics
 
@@ -569,6 +598,11 @@ def analysis_page() -> None:
                             None,
                             lambda: provider.generate_text(prompt, system_prompt=SYSTEM_GUIDE_ANALYSIS),
                         )
+                # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
+                run_step.set_text("빠진 부분이 없는지 확인하고 있어요...")
+                content = await loop.run_in_executor(
+                    None, lambda: repair_output(content, get_schema("analysis"), engine=engine),
+                )
                 sections = parse_analysis_sections(content)
                 state["ai_sections"] = sections
                 state["ai_raw"] = content
@@ -579,6 +613,8 @@ def analysis_page() -> None:
                     plan=plan, priority=priority,
                     var_warnings=var_warnings, pair_gaps=pair_gaps,
                     sections=sections, funnel=funnel, economics=economics,
+                    age_gender=(parsed or {}).get("age_gender_cells"),
+                    pair_comparisons=pair_comparisons,
                 )
                 results_card.classes(remove="hidden")
                 ui.notify("분석이 끝났어요. 결과를 확인하고 보고서를 내려받아 보세요.", type="positive")
@@ -589,9 +625,130 @@ def analysis_page() -> None:
                 run_spinner.classes("hidden")
                 run_btn.props(remove="disabled")
 
+        def _render_age_gender_heatmap(age_gender, ages) -> None:
+            """연령 × 성별 CPA 히트맵. 조인 데이터가 없으면 안내(연령 데이터가 있을 때만)."""
+            cells = (age_gender or {}).get("cells") or []
+            if not cells:
+                if ages:
+                    with ui.card().classes("w-full").style(
+                        "border-left:4px solid var(--dg-text-tertiary)"
+                    ):
+                        ui.label(
+                            "연령 × 성별 히트맵을 보려면 당근 광고관리자에서 breakdown을 "
+                            "내보낼 때 '성별'을 분류 기준에 함께 추가해 주세요."
+                        ).style("font-size:12px; color: var(--dg-text-secondary)")
+                return
+
+            hm_ages = age_gender["ages"]
+            hm_genders = age_gender["genders"]
+            lookup = {(c.age, c.gender): c for c in cells}
+            cpas = [c.cpa for c in cells if c.cpa > 0]
+            lo, hi = (min(cpas), max(cpas)) if cpas else (0.0, 0.0)
+
+            ui.label("연령 × 성별 히트맵 (색이 진할수록 CPA가 비싸요)").classes(
+                "dg-section-title"
+            ).style("margin-top:16px")
+            with ui.card().classes("w-full"):
+                ncols = len(hm_genders)
+                grid = ui.element("div").style(
+                    "display:grid; grid-template-columns: 84px "
+                    f"repeat({ncols}, minmax(92px, 1fr)); gap:6px; width:100%"
+                )
+                with grid:
+                    ui.label("연령").style(
+                        "font-size:11px; font-weight:600; color: var(--dg-text-tertiary); "
+                        "display:flex; align-items:flex-end; padding-bottom:6px"
+                    )
+                    for g in hm_genders:
+                        ui.label(g).style(
+                            "font-size:12px; font-weight:700; text-align:center; "
+                            "padding:6px 0; color: var(--dg-text-primary)"
+                        )
+                    for age in hm_ages:
+                        ui.label(age).style(
+                            "font-size:12px; font-weight:600; display:flex; "
+                            "align-items:center; color: var(--dg-text-primary)"
+                        )
+                        for g in hm_genders:
+                            cell = lookup.get((age, g))
+                            cpa = cell.cpa if cell else 0.0
+                            bg, fg = _cpa_heat_style(cpa, lo, hi)
+                            box = ui.element("div").style(
+                                f"background:{bg}; border-radius:8px; padding:8px 6px; "
+                                "text-align:center; min-height:48px"
+                            )
+                            with box:
+                                if cell is None or cpa <= 0:
+                                    ui.label("—").style(f"color:{fg}; font-size:13px")
+                                else:
+                                    ui.label(_fmt_won(cpa)).style(
+                                        f"color:{fg}; font-size:13px; font-weight:700"
+                                    )
+                                    ui.label(
+                                        f"행동 {cell.actions} · CTR {cell.ctr:.1f}%"
+                                    ).style(f"color:{fg}; opacity:0.82; font-size:10px")
+                ui.label(
+                    "CPA가 낮은(연한) 칸이 효율이 좋아요. '—'는 행동 데이터가 없는 칸이에요. "
+                    "효율 좋은 연령×성별 조합에 예산을 더 싣고, 비싼 칸은 캠페인에서 빼는 걸 검토해보세요."
+                ).style("font-size:11px; color: var(--dg-text-tertiary); margin-top:8px")
+
+        def _render_pair_comparison(pair_comparisons) -> None:
+            """자동/수동 페어 head-to-head 비교 카드. 페어가 없으면 렌더 안 함."""
+            pairs = pair_comparisons or []
+            if not pairs:
+                return
+
+            _WIN = {
+                "manual": ("수동 우위", "var(--dg-primary)"),
+                "auto": ("자동 우위", "#7295C4"),
+                "tie": ("비슷 (안정화 중)", "var(--dg-text-tertiary)"),
+            }
+            ui.label("자동/수동 페어 비교 — 같은 조건에서 어느 모드가 효율적인지").classes(
+                "dg-section-title"
+            ).style("margin-top:16px")
+
+            for p in pairs:
+                win_label, win_color = _WIN[p.winner]
+                with ui.card().classes("w-full").style(f"border-left:5px solid {win_color}"):
+                    with ui.row().classes("w-full items-center justify-between"):
+                        ui.label(f"{p.age_range or '전체'} · {p.creative_key}").style(
+                            "font-size:13px; font-weight:700; color: var(--dg-text-primary)"
+                        )
+                        ui.label(win_label).style(
+                            f"font-size:11px; font-weight:700; color:{win_color}; "
+                            f"background: var(--dg-surface); border:1px solid {win_color}; "
+                            "border-radius:999px; padding:2px 10px"
+                        )
+
+                    def _side(title: str, c, highlight: bool) -> None:
+                        border = f"2px solid {win_color}" if highlight else "1px solid var(--dg-border)"
+                        with ui.element("div").style(
+                            f"flex:1; border:{border}; border-radius:10px; padding:10px 12px"
+                        ):
+                            ui.label(title).style(
+                                "font-size:11px; font-weight:700; color: var(--dg-text-secondary)"
+                            )
+                            cpa_txt = _fmt_won(c.cpa) if c.actions > 0 else "행동 없음"
+                            ui.label(cpa_txt).style(
+                                "font-size:18px; font-weight:800; color: var(--dg-text-primary); margin-top:2px"
+                            )
+                            ui.label(
+                                f"비용 {_fmt_won(c.cost)} · 행동 {c.actions} · CTR {c.ctr:.1f}%"
+                            ).style("font-size:11px; color: var(--dg-text-tertiary); margin-top:2px")
+
+                    with ui.row().classes("w-full items-stretch gap-3").style("margin-top:8px"):
+                        _side("수동", p.manual, p.winner == "manual")
+                        _side("자동", p.auto, p.winner == "auto")
+
+                    ui.label(p.recommendation).style(
+                        "font-size:12px; color: var(--dg-text-secondary); margin-top:8px; "
+                        "line-height:1.5"
+                    )
+
         def _render_results(*, ages, campaigns, judgments, plan, priority,
                             var_warnings, pair_gaps, sections,
-                            funnel=None, economics=None) -> None:
+                            funnel=None, economics=None, age_gender=None,
+                            pair_comparisons=None) -> None:
             results_body.clear()
             with results_body:
 
@@ -692,6 +849,12 @@ def analysis_page() -> None:
                         "dg-section-title"
                     ).style("margin-top:16px")
                     _render_age_groups(ages)
+
+                # ── 연령 × 성별 히트맵 ──
+                _render_age_gender_heatmap(age_gender, ages)
+
+                # ── 자동/수동 페어 비교 ──
+                _render_pair_comparison(pair_comparisons)
 
                 # ── 원본 데이터 ──
                 with ui.expansion("원본 데이터 표 보기", icon="table_chart").classes("w-full"):
