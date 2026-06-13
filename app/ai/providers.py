@@ -554,8 +554,87 @@ class ClaudeCliProvider(BaseProvider):
         return text
 
 
+class OpenAICliProvider(BaseProvider):
+    """OpenAI GPT via the local `codex` CLI (ChatGPT 구독, API 키 불필요).
+
+    ClaudeCliProvider와 동일한 철학: `codex exec`를 비대화형으로 호출하고
+    `--output-last-message`로 최종 메시지만 읽어온다. 사용자의 codex 로그인
+    세션(구독)을 사용하므로 OPENAI_API_KEY가 필요 없다.
+
+    텍스트 전용 — 이미지 생성(gpt-image-2)은 CLI 경로가 없어 OpenAIProvider(API)를 써야 한다.
+    """
+
+    def __init__(self, model: str | None = None, timeout: float = 300.0) -> None:
+        import shutil
+        # codex 기본 모델 사용 (빈 문자열이면 -m 미전달). OPENAI_CLI_MODEL로 override.
+        self._model = model or os.getenv("OPENAI_CLI_MODEL", "")
+        self._timeout = timeout
+        self._cli_path = shutil.which("codex") or "codex"
+
+    def generate_text(self, prompt: str, *, system_prompt: str | None = None) -> str:
+        import os as _os
+        import subprocess
+        import tempfile
+
+        full = prompt if not system_prompt else f"{system_prompt}\n\n---\n\n{prompt}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = _os.path.join(tmp, "last.txt")
+            args = [
+                self._cli_path, "exec",
+                "-s", "read-only",          # 파일 변경 금지 (순수 텍스트 생성)
+                "--skip-git-repo-check",
+                "--ephemeral",              # 세션 파일 미저장
+                "--color", "never",
+                "-C", tmp,                  # 작업 루트를 임시 폴더로
+                "-o", out_path,
+            ]
+            if self._model:
+                args += ["-m", self._model]
+            args += ["-"]                   # 프롬프트는 stdin으로
+
+            _log.info("Codex CLI 호출 시작 (model=%s)", self._model or "default")
+            try:
+                result = subprocess.run(
+                    args, input=full, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=self._timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                _log.error("Codex CLI 타임아웃")
+                raise ValueError(
+                    f"Codex CLI 응답이 {self._timeout:.0f}초 안에 오지 않았습니다."
+                ) from exc
+            except FileNotFoundError as exc:
+                _log.error("codex CLI 실행 파일을 찾지 못함")
+                raise ValueError(
+                    "codex CLI를 찾지 못했습니다. 'npm i -g @openai/codex'로 설치하고 "
+                    "'codex login'으로 로그인되어 있는지 확인하세요."
+                ) from exc
+
+            text = ""
+            try:
+                with open(out_path, encoding="utf-8") as f:
+                    text = f.read().strip()
+            except OSError:
+                text = (result.stdout or "").strip()
+
+            if not text:
+                err = (result.stderr or "").strip() or (result.stdout or "").strip()
+                _log.error("Codex CLI 응답 비정상 (rc=%d): %s", result.returncode, err[:300])
+                low = err.lower()
+                if "login" in low or "not logged in" in low or "unauthorized" in low:
+                    raise ValueError(
+                        "codex CLI에 로그인되어 있지 않습니다. 터미널에서 "
+                        "'codex login' 후 다시 시도하세요."
+                    )
+                raise ValueError(f"Codex CLI 호출 실패: {err or '응답이 비어 있습니다.'}")
+
+            _log.info("Codex CLI 호출 완료 (%d chars)", len(text))
+            return text
+
+
 def get_provider(engine: str) -> BaseProvider:
-    """Factory: 'claude' | 'claude-api' | 'gpt' → instantiated provider.
+    """Factory: 'claude' | 'claude-api' | 'gpt' | 'gpt-api' → instantiated provider.
 
     'claude' (default) uses the local `claude` CLI so the user's Claude Code
     subscription pays for the call. Set CLAUDE_BACKEND=api in the .env to
@@ -574,9 +653,16 @@ def get_provider(engine: str) -> BaseProvider:
     elif engine == "claude-cli":
         return ClaudeCliProvider()
     elif engine == "gpt":
+        backend = os.getenv("OPENAI_BACKEND", "cli").strip().lower()
+        if backend == "api":
+            return OpenAIProvider()
+        return OpenAICliProvider()
+    elif engine == "gpt-cli":
+        return OpenAICliProvider()
+    elif engine == "gpt-api":
         return OpenAIProvider()
     else:
         raise ValueError(
             f"Unknown engine {engine!r}. "
-            f"Valid values: 'claude', 'claude-cli', 'claude-api', 'gpt'."
+            f"Valid values: 'claude', 'claude-cli', 'claude-api', 'gpt', 'gpt-cli', 'gpt-api'."
         )

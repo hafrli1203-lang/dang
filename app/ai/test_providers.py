@@ -407,15 +407,28 @@ class TestGetProvider(unittest.TestCase):
         provider = get_provider("claude-api")
         self.assertIsInstance(provider, ClaudeProvider)
 
+    @patch.dict(os.environ, {"OPENAI_BACKEND": "cli"}, clear=False)
+    def test_returns_openai_cli_provider_by_default(self):
+        """get_provider('gpt') uses codex CLI by default (no API key needed)."""
+        from app.ai.providers import get_provider, OpenAICliProvider
+        provider = get_provider("gpt")
+        self.assertIsInstance(provider, OpenAICliProvider)
+
     @unittest.skipUnless(HAS_OPENAI, "openai not installed")
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "key"})
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_BACKEND": "api"})
     @patch("openai.OpenAI")
-    def test_returns_openai_provider(self, mock_cls):
-        """get_provider('gpt') should return OpenAIProvider."""
+    def test_returns_openai_api_provider_when_backend_set(self, mock_cls):
+        """OPENAI_BACKEND=api forces the OpenAIProvider (API) path."""
         mock_cls.return_value = MagicMock()
         from app.ai.providers import get_provider, OpenAIProvider
         provider = get_provider("gpt")
         self.assertIsInstance(provider, OpenAIProvider)
+
+    def test_returns_openai_cli_provider_explicit(self):
+        """Explicit 'gpt-cli' returns OpenAICliProvider regardless of env."""
+        from app.ai.providers import get_provider, OpenAICliProvider
+        provider = get_provider("gpt-cli")
+        self.assertIsInstance(provider, OpenAICliProvider)
 
     def test_raises_on_unknown_engine(self):
         """get_provider with unknown name should raise ValueError."""
@@ -423,6 +436,73 @@ class TestGetProvider(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             get_provider("gpt4")
         self.assertIn("gpt4", str(ctx.exception))
+
+
+class TestOpenAICliProvider(unittest.TestCase):
+    """OpenAICliProvider tests with mocked codex CLI subprocess."""
+
+    @patch("subprocess.run")
+    def test_generate_text_reads_last_message(self, mock_run):
+        """generate_text reads the agent's final message from --output-last-message file."""
+        def fake_run(args, **kwargs):
+            out_path = args[args.index("-o") + 1]
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("코덱스가 작성한 결과")
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = ""
+            m.stderr = ""
+            return m
+        mock_run.side_effect = fake_run
+
+        from app.ai.providers import OpenAICliProvider
+        provider = OpenAICliProvider()
+        result = provider.generate_text("프롬프트", system_prompt="시스템 가이드")
+
+        self.assertEqual(result, "코덱스가 작성한 결과")
+        called = mock_run.call_args[0][0]
+        self.assertIn("exec", called)          # codex exec 비대화형
+        self.assertIn("read-only", called)     # 파일 변경 금지
+        # system_prompt가 stdin에 결합되어 전달
+        self.assertIn("시스템 가이드", mock_run.call_args[1]["input"])
+        self.assertIn("프롬프트", mock_run.call_args[1]["input"])
+
+    @patch("subprocess.run")
+    def test_login_error_message(self, mock_run):
+        """Not-logged-in stderr should produce a clear login guidance message."""
+        m = MagicMock()
+        m.returncode = 1
+        m.stdout = ""
+        m.stderr = "Not logged in. Run codex login."
+        mock_run.return_value = m  # 결과 파일 미생성
+
+        from app.ai.providers import OpenAICliProvider
+        provider = OpenAICliProvider()
+        with self.assertRaises(ValueError) as ctx:
+            provider.generate_text("프롬프트")
+        self.assertIn("로그인", str(ctx.exception))
+
+    @patch("subprocess.run")
+    def test_respects_cli_model_env_var(self, mock_run):
+        """OPENAI_CLI_MODEL should be passed via -m."""
+        def fake_run(args, **kwargs):
+            out_path = args[args.index("-o") + 1]
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("ok")
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = ""
+            m.stderr = ""
+            return m
+        mock_run.side_effect = fake_run
+
+        with patch.dict(os.environ, {"OPENAI_CLI_MODEL": "gpt-5-codex"}):
+            from app.ai.providers import OpenAICliProvider
+            provider = OpenAICliProvider()
+            provider.generate_text("p")
+        called = mock_run.call_args[0][0]
+        self.assertIn("-m", called)
+        self.assertIn("gpt-5-codex", called)
 
 
 class TestRetryApiCall(unittest.TestCase):

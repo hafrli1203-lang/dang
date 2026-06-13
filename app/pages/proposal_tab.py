@@ -233,7 +233,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                     from app.ai.coordination import synthesize
                     progress_label.set_text("Claude와 GPT가 각자 초안을 쓰고 있어요...")
                     claude_p = get_provider("claude")
-                    gpt_p = OpenAIProvider()
+                    gpt_p = get_provider("gpt")
                     c_text, g_text = await asyncio.gather(
                         loop.run_in_executor(
                             None, lambda: claude_p.generate_text(prompt, system_prompt=guide)

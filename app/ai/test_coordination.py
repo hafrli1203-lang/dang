@@ -60,8 +60,11 @@ class TestCoordinateGenerate(unittest.IsolatedAsyncioTestCase):
         gpt_p.generate_text.return_value = "GPT 초안"
 
         loop = asyncio.get_running_loop()
-        with patch.object(coordination, "get_provider", return_value=claude_p), \
-             patch("app.ai.providers.OpenAIProvider", return_value=gpt_p), \
+
+        def fake_get_provider(engine):
+            return claude_p if engine == "claude" else gpt_p
+
+        with patch.object(coordination, "get_provider", side_effect=fake_get_provider), \
              patch.object(coordination, "synthesize", return_value="최종 종합본") as syn:
             result = await coordination.coordinate_generate(
                 loop, "프롬프트", "시스템가이드", "전략 분석",

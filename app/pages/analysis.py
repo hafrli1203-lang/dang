@@ -531,7 +531,7 @@ def analysis_page() -> None:
                 if engine == "coordinate":
                     from app.ai.coordination import synthesize
                     claude_p = get_provider("claude")
-                    gpt_p = OpenAIProvider()
+                    gpt_p = get_provider("gpt")
 
                     def _claude_draft():
                         # 썸네일은 멀티모달 지원하는 Claude 초안에만 전달

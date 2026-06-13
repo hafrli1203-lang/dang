@@ -74,20 +74,25 @@ python main.py   # http://localhost:8000
 
 ## Environment (.env)
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+# 텍스트는 기본 CLI(구독) — 아래 키들은 API 모드로 쓸 때만 필요
+ANTHROPIC_API_KEY=sk-ant-...          # CLAUDE_BACKEND=api 일 때만
+OPENAI_API_KEY=sk-...                 # OPENAI_BACKEND=api 또는 이미지 생성에 필요
 CLAUDE_MODEL=claude-opus-4-6          # default
-OPENAI_MODEL=gpt-4o                   # default (텍스트)
+OPENAI_MODEL=gpt-4o                   # API 모드 텍스트 모델
+OPENAI_CLI_MODEL=                     # codex 모델 override (비우면 codex 기본)
 OPENAI_IMAGE_MODEL=gpt-image-2        # default (이미지)
 OPENAI_SYNTHESIS_ENGINE=claude        # 조율 종합 엔진 (default: claude)
 STORAGE_SECRET=...
 ```
 
-## AI 엔진 (Gemini 제거됨, 2026-06-13)
-- 텍스트: Claude(기본, CLI) / GPT(OpenAI) / **Claude+GPT 조율**(병렬 초안→종합)
-- 이미지: OpenAI `gpt-image-2` (썸네일). Gemini/google-genai 의존성 완전 제거.
-- 조율(coordinate): 콘텐츠 생성·분석·보고서·제안서·위자드 전 스텝에서 선택 가능.
-  `app/ai/coordination.py`의 `synthesize` / `coordinate_generate`.
+## AI 엔진 (Gemini 제거됨 / CLI 우선, 2026-06-13)
+- **텍스트는 CLI 구독이 기본 — API 키 불필요**:
+  - Claude → `claude` CLI (ClaudeCliProvider). `CLAUDE_BACKEND=api`면 API.
+  - GPT → `codex exec` CLI (OpenAICliProvider, ChatGPT 구독). `OPENAI_BACKEND=api`면 API.
+- 엔진 선택: Claude / GPT / **Claude+GPT 조율**(병렬 초안→Claude 종합). 둘 다 CLI라 조율도 키 불필요.
+- **이미지(gpt-image-2)는 CLI 경로 없음 → OPENAI_API_KEY 필요** (썸네일). codex는 이미지 생성 못 함.
+- 조율: `app/ai/coordination.py` (`synthesize` / `coordinate_generate`). 위자드 4스텝·분석·보고서·제안서.
+- 새 텍스트 호출부는 `get_provider("claude")`/`get_provider("gpt")` 사용 (직접 Provider() 인스턴스화 지양).
 
 ## Tests
 ```bash

@@ -104,12 +104,11 @@ async def coordinate_generate(
     """
     import asyncio
 
-    from app.ai.providers import OpenAIProvider
-
     if on_drafts:
         on_drafts()
+    # 둘 다 CLI 기본(claude=Claude Code, gpt=codex 구독). OPENAI_BACKEND=api면 GPT는 API.
     claude_p = get_provider("claude")
-    gpt_p = OpenAIProvider()
+    gpt_p = get_provider("gpt")
     c_text, g_text = await asyncio.gather(
         loop.run_in_executor(None, lambda: claude_p.generate_text(prompt, system_prompt=system_prompt)),
         loop.run_in_executor(None, lambda: gpt_p.generate_text(prompt, system_prompt=system_prompt)),

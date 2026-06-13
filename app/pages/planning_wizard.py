@@ -469,8 +469,10 @@ def build_wizard_ui(
                 and not os.getenv("ANTHROPIC_API_KEY", "")):
             ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
-        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
-            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
+        # GPT는 기본이 codex CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine in ("gpt", "coordinate") and os.getenv("OPENAI_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("OPENAI_API_KEY", "")):
+            ui.notify("GPT를 API 모드로 쓰려면 .env에 OPENAI_API_KEY가 필요해요. (CLI 모드는 codex 로그인으로 동작)", type="negative")
             return
 
         btn = _wizard_state.get("_s1_btn")
@@ -1085,8 +1087,9 @@ def build_wizard_ui(
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
                     return
-                if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
-                    ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
+                if (engine in ("gpt", "coordinate") and os.getenv("OPENAI_BACKEND", "cli").strip().lower() == "api"
+                        and not os.getenv("OPENAI_API_KEY", "")):
+                    ui.notify("GPT를 API 모드로 쓰려면 .env에 OPENAI_API_KEY가 필요해요. (CLI 모드는 codex 로그인으로 동작)", type="negative")
                     spinner.classes("hidden")
                     gen_btn.props(remove="disabled")
                     cancel_btn.classes("hidden")
@@ -1124,7 +1127,7 @@ def build_wizard_ui(
                             claude_guide = _custom
                             gpt_guide = _custom
                         claude_p = get_provider("claude")
-                        gpt_p = OpenAIProvider()
+                        gpt_p = get_provider("gpt")
                         c_text, g_text = await asyncio.gather(
                             loop.run_in_executor(None, lambda: claude_p.generate_text(prompt, system_prompt=claude_guide)),
                             loop.run_in_executor(None, lambda: gpt_p.generate_text(prompt, system_prompt=gpt_guide)),
@@ -1646,8 +1649,10 @@ def build_wizard_ui(
                 and not os.getenv("ANTHROPIC_API_KEY", "")):
             ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
-        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
-            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
+        # GPT는 기본이 codex CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine in ("gpt", "coordinate") and os.getenv("OPENAI_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("OPENAI_API_KEY", "")):
+            ui.notify("GPT를 API 모드로 쓰려면 .env에 OPENAI_API_KEY가 필요해요. (CLI 모드는 codex 로그인으로 동작)", type="negative")
             return
 
         btn = _wizard_state.get("_s3_btn")
@@ -1953,8 +1958,10 @@ def build_wizard_ui(
                 and not os.getenv("ANTHROPIC_API_KEY", "")):
             ui.notify("Claude를 API 모드로 쓰려면 .env에 ANTHROPIC_API_KEY가 필요해요. (CLI 모드는 키 없이 동작)", type="negative")
             return
-        if engine in ("gpt", "coordinate") and not os.getenv("OPENAI_API_KEY", ""):
-            ui.notify("OpenAI API 키가 아직 등록되지 않았어요. .env 파일에 OPENAI_API_KEY를 추가해 주세요.", type="negative")
+        # GPT는 기본이 codex CLI(구독). API 백엔드일 때만 키 필요.
+        if (engine in ("gpt", "coordinate") and os.getenv("OPENAI_BACKEND", "cli").strip().lower() == "api"
+                and not os.getenv("OPENAI_API_KEY", "")):
+            ui.notify("GPT를 API 모드로 쓰려면 .env에 OPENAI_API_KEY가 필요해요. (CLI 모드는 codex 로그인으로 동작)", type="negative")
             return
 
         btn = _wizard_state.get("_s4_btn")
