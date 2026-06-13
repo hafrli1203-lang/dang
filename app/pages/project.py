@@ -6,6 +6,8 @@
 - 상단 한 줄: 제목/개수 + 검색 + 데이터 관리 + 새 프로젝트
 """
 import re
+import base64
+from pathlib import Path
 from collections import OrderedDict, defaultdict
 
 from nicegui import ui, app as nicegui_app
@@ -23,6 +25,7 @@ from app.database import (
     get_latest_content,
     get_latest_report,
     get_thumbnail_counts,
+    get_thumbnails,
     get_latest_project_for_store,
     get_setting,
     save_setting,
@@ -102,6 +105,16 @@ def _targeting_summary(p: dict) -> str:
 # 당근 연령대 밴드 (광고그룹 타겟과 동일 순서)
 _AGE_BANDS = ["15~19", "20~24", "25~29", "30~34", "35~39",
               "40~44", "45~49", "50~54", "55~59", "60이상"]
+
+
+def _img_data_url(path: str) -> str | None:
+    """로컬 썸네일 파일 → data URL (NiceGUI ui.image용). 없으면 None."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    ext = p.suffix.lower()
+    mime = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+    return f"data:{mime};base64,{base64.b64encode(p.read_bytes()).decode()}"
 
 
 @ui.page("/")
@@ -208,6 +221,12 @@ def project_page() -> None:
         with ui.row().classes("mt-5 gap-3"):
             ui.button("삭제", icon="delete", on_click=lambda: _delete()).classes("dg-btn-danger")
             ui.button("취소", on_click=del_dlg.close).classes("dg-btn-secondary")
+
+    # ══════════════════ 소재 상세 다이얼로그 (당근식: 타겟+소재+소식글+썸네일) ══════════════════
+    with ui.dialog() as detail_dlg, ui.card().classes("dg-card").style(
+        "width: 860px; max-width: 96vw"
+    ):
+        detail_body = ui.column().classes("w-full gap-2")
 
     # ══════════════════ 페이지 레이아웃 ══════════════════
     with ui.column().classes("dg-page-content w-full gap-4"):
@@ -350,7 +369,7 @@ def project_page() -> None:
                                         summary = (summary + " · " if summary else "") + f"이미지 {tcount}"
                                     if summary:
                                         ui.label(summary).classes("dg-campaign-target")
-                                row.on("click", lambda _, _pid=pid: _select(_pid))
+                                row.on("click", lambda _, _pid=pid: _open_detail(_pid))
 
     def _dismiss_onboarding() -> None:
         save_setting("onboarding_dismissed", "1")
@@ -428,6 +447,69 @@ def project_page() -> None:
         nicegui_app.storage.user["current_project_id"] = pid
         state["current_id"] = pid
         refresh_grid()
+
+    def _open_detail(pid: int) -> None:
+        """소재(캠페인) 클릭 → 당근식 상세: 타겟·소재제목·쿠폰·소식글·썸네일 한 화면."""
+        p = get_project(pid)
+        if not p:
+            ui.notify("캠페인을 찾을 수 없어요.", type="negative")
+            return
+        nicegui_app.storage.user["current_project_id"] = pid
+        state["current_id"] = pid
+        mo_label = _month_key(p)[1]
+        detail_body.clear()
+        with detail_body:
+            ui.label(p.get("name", "")).classes("dg-section-title")
+            ui.label(f"{mo_label} · {_campaign_label(p, mo_label)}").classes("dg-text-sm")
+            with ui.row().classes("w-full gap-5 no-wrap items-start mt-2"):
+                # 좌: 타겟/쿠폰/소재제목/소식글
+                with ui.column().classes("gap-1").style("flex: 1; min-width: 0"):
+                    ui.label("오디언스 타겟").classes("dg-subsection")
+                    ui.label(_targeting_summary(p) or "타겟 미기록").classes("dg-text-sm")
+                    if p.get("daily_budget"):
+                        ui.label(f"일일 예산 {p['daily_budget']}").classes("dg-text-sm")
+                    if p.get("coupon_info"):
+                        ui.label(f"쿠폰 · {p['coupon_info']}").classes("dg-text-sm")
+                    titles = [t for t in (p.get("ad_titles") or "").splitlines() if t.strip()]
+                    if titles:
+                        ui.label("소재 제목").classes("dg-subsection")
+                        for t in titles:
+                            ui.label("• " + t.strip()).classes("dg-text-sm")
+                    ui.label("소식글").classes("dg-subsection")
+                    content = get_latest_content(pid)
+                    if content and (content.get("content") or "").strip():
+                        ui.markdown(content["content"][:4000]).classes("dg-text-sm").style(
+                            "max-height: 240px; overflow: auto; width: 100%"
+                        )
+                    else:
+                        ui.label("저장된 소식글이 없어요. (광고 기획에서 생성)").classes("dg-text-sm")
+                # 우: 썸네일 갤러리
+                with ui.column().classes("gap-2").style("width: 280px; flex-shrink: 0"):
+                    ui.label("썸네일").classes("dg-subsection")
+                    thumbs = get_thumbnails(pid)
+                    shown = 0
+                    if thumbs:
+                        with ui.row().classes("gap-2 flex-wrap"):
+                            for t in thumbs:
+                                url = _img_data_url(t.get("file_path", ""))
+                                if url:
+                                    ui.image(url).style(
+                                        "width: 120px; height: 120px; object-fit: cover; "
+                                        "border-radius: 10px; border: 1px solid var(--dg-border)"
+                                    )
+                                    shown += 1
+                    if not shown:
+                        ui.label("저장된 썸네일이 없어요. (썸네일 제작에서 생성·저장)").classes("dg-text-sm")
+            with ui.row().classes("w-full mt-3 gap-1 items-center"):
+                ui.button("기획", icon="edit_note", color=None,
+                          on_click=lambda: _go(pid, "/planning")).props("flat no-caps").classes("dg-quick-link")
+                ui.button("성과", icon="assessment", color=None,
+                          on_click=lambda: _go(pid, "/report")).props("flat no-caps").classes("dg-quick-link")
+                ui.button("수정", icon="edit", color=None,
+                          on_click=lambda: (detail_dlg.close(), _open_edit(pid))).props("flat no-caps").classes("dg-quick-link")
+                ui.space()
+                ui.button("닫기", on_click=detail_dlg.close).classes("dg-btn-secondary")
+        detail_dlg.open()
 
     def _go(pid: int, path: str) -> None:
         nicegui_app.storage.user["current_project_id"] = pid

@@ -3,11 +3,15 @@
 
 import unittest
 
+import os
+import tempfile
+
 from app.pages.project import (
     _month_key,
     _campaign_label,
     _fmt_budget,
     _targeting_summary,
+    _img_data_url,
 )
 
 
@@ -84,6 +88,22 @@ class TestTargetingSummary(unittest.TestCase):
 
     def test_empty(self):
         self.assertEqual(_targeting_summary({}), "")
+
+
+class TestImgDataUrl(unittest.TestCase):
+    def test_missing_file_returns_none(self):
+        self.assertIsNone(_img_data_url("/nope/none.png"))
+
+    def test_real_file_returns_data_url(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.write(b"\x89PNG\r\n\x1a\n")
+        tmp.close()
+        try:
+            url = _img_data_url(tmp.name)
+            self.assertIsNotNone(url)
+            self.assertTrue(url.startswith("data:image/png;base64,"))
+        finally:
+            os.unlink(tmp.name)
 
 
 if __name__ == "__main__":
