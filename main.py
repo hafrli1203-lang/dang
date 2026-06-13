@@ -85,22 +85,28 @@ if __name__ in ("__main__", "__mp_main__"):
     if not native_available:
         import socket
 
-        def _pick_free_port(preferred: int = 8000, max_tries: int = 10) -> int:
-            """127.0.0.1 기준으로 비어 있는 포트를 찾는다.
+        def _port_free(port: int) -> bool:
+            """0.0.0.0 과 127.0.0.1 양쪽 모두 바인딩 가능할 때만 비어 있다고 본다.
 
-            다른 앱(예: 다른 프로젝트의 uvicorn)이 127.0.0.1:8000을 선점하면
-            0.0.0.0 바인딩은 성공해도 localhost 접속이 그 앱으로 가버린다.
-            그래서 127.0.0.1에 직접 바인딩해 보고 실패하면 다음 포트를 쓴다.
+            ui.run은 0.0.0.0에 바인딩하므로 0.0.0.0 점유자(다른 인스턴스)를 잡아야 하고,
+            동시에 127.0.0.1만 선점한 앱(다른 uvicorn)이 localhost 접속을 가로채는 것도
+            막아야 한다. 한쪽만 검사하면 둘 중 하나를 놓친다(과거 버그).
             """
-            for port in range(preferred, preferred + max_tries):
+            for host in ("0.0.0.0", "127.0.0.1"):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
                         s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
                     try:
-                        s.bind(("127.0.0.1", port))
+                        s.bind((host, port))
                     except OSError:
-                        continue
-                return port
+                        return False
+            return True
+
+        def _pick_free_port(preferred: int = 8000, max_tries: int = 10) -> int:
+            """비어 있는 첫 포트를 찾는다 (양쪽 주소 모두 비어 있어야 함)."""
+            for port in range(preferred, preferred + max_tries):
+                if _port_free(port):
+                    return port
             return preferred
 
         _port = _pick_free_port(8000)
