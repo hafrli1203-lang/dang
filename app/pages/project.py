@@ -22,6 +22,7 @@ from app.database import (
     backup_db,
     get_latest_content,
     get_latest_report,
+    get_thumbnail_counts,
     get_setting,
     save_setting,
 )
@@ -251,6 +252,7 @@ def project_page() -> None:
     def refresh_grid() -> None:
         grid.clear()
         projects = get_projects()
+        thumb_counts = get_thumbnail_counts()
         q = (state["query"] or "").strip().lower()
         filtered = [p for p in projects if _matches(p, q)] if q else projects
         count_label.set_text(f"광고주 프로젝트 {len(projects)}개")
@@ -336,6 +338,9 @@ def project_page() -> None:
                                                 "click.stop", lambda _, _pid=pid: _open_edit(_pid)
                                             ).tooltip("수정")
                                     summary = _targeting_summary(it)
+                                    tcount = thumb_counts.get(pid, 0)
+                                    if tcount:
+                                        summary = (summary + " · " if summary else "") + f"이미지 {tcount}"
                                     if summary:
                                         ui.label(summary).classes("dg-campaign-target")
                                 row.on("click", lambda _, _pid=pid: _select(_pid))

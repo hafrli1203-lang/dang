@@ -136,6 +136,16 @@ def init_db() -> None:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS thumbnails (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  INTEGER NOT NULL,
+                file_path   TEXT NOT NULL,
+                title       TEXT DEFAULT '',
+                prompt      TEXT DEFAULT '',
+                created_at  TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS app_settings (
                 key        TEXT PRIMARY KEY,
                 value      TEXT NOT NULL,
@@ -224,6 +234,51 @@ def get_latest_content(
             (project_id, content_type),
         ).fetchone()
         return dict(row) if row else None
+
+
+# ── Thumbnails (캠페인별 썸네일 기록) ─────────────────────────────────────────
+
+def save_thumbnail(
+    project_id: int, file_path: str, title: str = "", prompt: str = ""
+) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO thumbnails (project_id, file_path, title, prompt)
+               VALUES (?,?,?,?)""",
+            (project_id, file_path, title, prompt),
+        )
+        return cur.lastrowid
+
+
+def get_thumbnails(project_id: int) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM thumbnails WHERE project_id=? ORDER BY created_at DESC, id DESC",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_thumbnail(thumb_id: int) -> Optional[Dict]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM thumbnails WHERE id=?", (thumb_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_thumbnail(thumb_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM thumbnails WHERE id=?", (thumb_id,))
+
+
+def get_thumbnail_counts() -> Dict[int, int]:
+    """{project_id: 썸네일 개수} — 그리드에서 1회 조회용."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT project_id, COUNT(*) AS n FROM thumbnails GROUP BY project_id"
+        ).fetchall()
+        return {r["project_id"]: r["n"] for r in rows}
 
 
 # ── Performance Rows ─────────────────────────────────────────────────────────

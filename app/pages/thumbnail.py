@@ -3,12 +3,13 @@ import asyncio
 import base64
 from datetime import datetime
 
-from nicegui import ui
+from nicegui import ui, app as nicegui_app
 
 from app.common import create_nav
 from app.theme import section_header
 from app.export_manager import ExportManager
 from app.paths import THUMBNAILS_DIR, sanitize_filename
+from app.database import save_thumbnail
 from app.logger import get_logger
 
 _log = get_logger("thumbnail")
@@ -263,3 +264,17 @@ def thumbnail_page() -> None:
         filename = f"{base_name}_{timestamp}{ext}"
 
         ExportManager.save_default(img_bytes, filename, dest_dir=THUMBNAILS_DIR)
+
+        # 현재 프로젝트가 선택돼 있으면 그 캠페인 기록에 썸네일을 묶어 저장
+        pid = nicegui_app.storage.user.get("current_project_id")
+        if pid:
+            try:
+                link_path = THUMBNAILS_DIR / f"proj{pid}_{timestamp}{ext}"
+                link_path.write_bytes(img_bytes)
+                save_thumbnail(
+                    int(pid), str(link_path),
+                    title=raw_name, prompt=(prompt_input.value or "").strip(),
+                )
+                ui.notify("선택한 프로젝트 기록에 썸네일을 저장했어요.", type="positive")
+            except Exception as exc:
+                _log.warning("썸네일 DB 기록 실패(파일은 저장됨): %s", exc)
