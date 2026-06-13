@@ -32,6 +32,7 @@ from app.ai_engine import (
 )
 from app.ai.news_post_guard import _split_blocks
 from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
+from app.ai.output_validator import repair_output, get_schema
 from app.reporting.docx_report import build_planning_docx, build_proposal_docx
 from app.export_manager import ExportManager
 from app.database import (
@@ -503,6 +504,13 @@ def build_wizard_ui(
                     None, lambda: provider.generate_text(prompt, system_prompt=guide),
                 )
 
+            # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
+            if status:
+                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+            content = await loop.run_in_executor(
+                None, lambda: repair_output(content, get_schema("strategy"), engine=engine),
+            )
+
             _wizard_state["step1_content"] = content
             _wizard_state["step1_sections"] = parse_strategy_sections(content)
             _wizard_state["project_id"] = pid
@@ -844,17 +852,23 @@ def build_wizard_ui(
                 thumb_status.set_text("썸네일을 만들고 있어요...")
 
                 try:
-                    from app.ai.providers import OpenAIProvider as _ImageProvider
-                    provider = _ImageProvider()
+                    from app.ai.image_provider import get_image_provider
+                    from app.ai.thumbnail_style import build_natural_thumbnail_prompt
+                    provider = get_image_provider()
                     loop = asyncio.get_running_loop()
                     ref = _thumb_state["ref_bytes"]
                     ref_mime = _thumb_state["ref_mime"]
+
+                    # 당근 피드용 자연 실사로 강제 — 광고 티가 나면 스크롤로 넘어간다.
+                    final_prompt = build_natural_thumbnail_prompt(
+                        prompt_text, has_reference=ref is not None
+                    )
 
                     if ref is not None:
                         img_bytes, mime = await loop.run_in_executor(
                             None,
                             lambda: provider.generate_image(
-                                prompt_text,
+                                final_prompt,
                                 reference_image=ref,
                                 reference_mime=ref_mime,
                             ),
@@ -862,7 +876,7 @@ def build_wizard_ui(
                     else:
                         img_bytes, mime = await loop.run_in_executor(
                             None,
-                            lambda: provider.generate_image(prompt_text),
+                            lambda: provider.generate_image(final_prompt),
                         )
 
                     _thumb_state["result_bytes"] = img_bytes
@@ -1688,6 +1702,13 @@ def build_wizard_ui(
                     None, lambda: provider.generate_text(prompt, system_prompt=guide),
                 )
 
+            # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
+            if status:
+                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+            content = await loop.run_in_executor(
+                None, lambda: repair_output(content, get_schema("ad_settings"), engine=engine),
+            )
+
             _wizard_state["step3_content"] = content
             _wizard_state["step3_sections"] = parse_ad_settings_sections(content)
             save_generated_content(pid, engine, content, content_type="ad_settings")
@@ -1996,6 +2017,13 @@ def build_wizard_ui(
                 content = await loop.run_in_executor(
                     None, lambda: provider.generate_text(prompt, system_prompt=guide),
                 )
+
+            # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
+            if status:
+                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+            content = await loop.run_in_executor(
+                None, lambda: repair_output(content, get_schema("wizard_proposal"), engine=engine),
+            )
 
             _wizard_state["step4_content"] = content
             _wizard_state["step4_sections"] = parse_wizard_proposal_sections(content)
