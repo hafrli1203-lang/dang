@@ -27,7 +27,12 @@ app/
   chart_preview.py               # matplotlib 차트 생성
   ai/
     providers.py                 # ClaudeProvider / GeminiProvider + retry_api_call()
-    image_provider.py            # GeminiImageProvider (썸네일)
+    image_provider.py            # get_image_provider() 팩토리 + OpenAIImageProvider(API) + 실패 가이드
+    image_cli_provider.py        # GtiImageProvider — gti CLI 이미지 생성 (구독, 키 불필요)
+    thumbnail_style.py           # build_natural_thumbnail_prompt() — 당근 자연 실사(비광고) 강제
+    output_validator.py          # 섹션 스키마 검증 + 1회 리페어 루프 (위자드 출력 누락 방지)
+    nanobanana_prompt.py         # (deprecated/dead) MASTER AD GENERATOR — 호출 안 됨, 방향 반대
+  onboarding.py                  # 온보딩 체크리스트 로직 (6단계, DB 상태로 완료 판정)
     news_post_guard.py           # 소식글 검증 + 자동 보정
     text_overlay.py              # PIL 텍스트 오버레이
     nanobanana_prompt.py         # Style Fusion / Image Mapping 프롬프트
@@ -76,7 +81,8 @@ python main.py   # http://localhost:8000
 ```
 # 텍스트는 기본 CLI(구독) — 아래 키들은 API 모드로 쓸 때만 필요
 ANTHROPIC_API_KEY=sk-ant-...          # CLAUDE_BACKEND=api 일 때만
-OPENAI_API_KEY=sk-...                 # OPENAI_BACKEND=api 또는 이미지 생성에 필요
+OPENAI_API_KEY=sk-...                 # OPENAI_BACKEND=api 또는 OPENAI_IMAGE_BACKEND=api 일 때만
+OPENAI_IMAGE_BACKEND=cli              # cli(gti, 키 불필요) | api(gpt-image-2, 키 필요)
 CLAUDE_MODEL=claude-opus-4-6          # default
 OPENAI_MODEL=gpt-4o                   # API 모드 텍스트 모델
 OPENAI_CLI_MODEL=                     # codex 모델 override (비우면 codex 기본)
@@ -90,7 +96,7 @@ STORAGE_SECRET=...
   - Claude → `claude` CLI (ClaudeCliProvider). `CLAUDE_BACKEND=api`면 API.
   - GPT → `codex exec` CLI (OpenAICliProvider, ChatGPT 구독). `OPENAI_BACKEND=api`면 API.
 - 엔진 선택: Claude / GPT / **Claude+GPT 조율**(병렬 초안→Claude 종합). 둘 다 CLI라 조율도 키 불필요.
-- **이미지(gpt-image-2)는 CLI 경로 없음 → OPENAI_API_KEY 필요** (썸네일). codex는 이미지 생성 못 함.
+- **이미지도 CLI 기본 → API 키 불필요** (썸네일): `gti` CLI(god-tibo-imagen)가 codex 구독 세션으로 ChatGPT 백엔드의 `image_generation` 툴을 호출. `app/ai/image_cli_provider.py`(GtiImageProvider). Windows는 `--provider private-codex` 고정(auto는 ENOENT). `OPENAI_IMAGE_BACKEND=api`면 공식 OpenAI Images API(gpt-image-2, OPENAI_API_KEY 필요)로 폴백. 호출부는 `get_image_provider()` 사용.
 - 조율: `app/ai/coordination.py` (`synthesize` / `coordinate_generate`). 위자드 4스텝·분석·보고서·제안서.
 - 새 텍스트 호출부는 `get_provider("claude")`/`get_provider("gpt")` 사용 (직접 Provider() 인스턴스화 지양).
 
