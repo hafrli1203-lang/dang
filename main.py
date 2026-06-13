@@ -44,6 +44,11 @@ if os.path.isdir(_static_dir):
 
 storage_secret = os.getenv("STORAGE_SECRET", "daangn-reporter-default-secret")
 
+# ── App favicon (브라우저 탭 + 네이티브 창 아이콘) ──────────────────────────────
+# app_icon.ico는 빌드/인스톨러뿐 아니라 실행 중인 앱에도 favicon으로 배선한다.
+_favicon_path = os.path.join(str(BUNDLE_DIR), "app_icon.ico")
+_favicon = _favicon_path if os.path.isfile(_favicon_path) else None
+
 
 # ── Startup update check (background, non-blocking) ──────────────────────────
 @nicegui_app.on_startup
@@ -74,6 +79,7 @@ if __name__ in ("__main__", "__mp_main__"):
             ui.run(
                 native=True,
                 title="당근 광고 기획 도우미",
+                favicon=_favicon,
                 window_size=(1320, 900),
                 storage_secret=storage_secret,
                 reload=False,
@@ -102,16 +108,21 @@ if __name__ in ("__main__", "__mp_main__"):
                         return False
             return True
 
-        def _pick_free_port(preferred: int = 8000, max_tries: int = 10) -> int:
+        def _pick_free_port(preferred: int = 8080, max_tries: int = 10) -> int:
             """비어 있는 첫 포트를 찾는다 (양쪽 주소 모두 비어 있어야 함)."""
             for port in range(preferred, preferred + max_tries):
                 if _port_free(port):
                     return port
             return preferred
 
-        _port = _pick_free_port(8000)
-        if _port != 8000:
-            print(f"\n[안내] 8000 포트를 다른 프로그램이 사용 중이라 {_port} 포트로 실행합니다.", file=sys.stderr)
+        # 기본 포트 8080 고정 — DAANGN_PORT 환경변수로 덮어쓰기 가능. 점유 시에만 자동 대체.
+        try:
+            _preferred = int(os.getenv("DAANGN_PORT", "8080"))
+        except ValueError:
+            _preferred = 8080
+        _port = _pick_free_port(_preferred)
+        if _port != _preferred:
+            print(f"\n[안내] {_preferred} 포트를 다른 프로그램이 사용 중이라 {_port} 포트로 실행합니다.", file=sys.stderr)
         print("\n[안내] 브라우저 모드로 실행합니다.", file=sys.stderr)
         print(f"브라우저에서  http://localhost:{_port}  을 열어주세요.\n", file=sys.stderr)
         ui.run(
@@ -119,6 +130,7 @@ if __name__ in ("__main__", "__mp_main__"):
             port=_port,
             show=True,
             title="당근 광고 기획 도우미",
+            favicon=_favicon,
             storage_secret=storage_secret,
             reload=False,
         )

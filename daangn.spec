@@ -25,6 +25,7 @@ docx_datas = collect_data_files('docx')
 project_datas = [
     (str(ROOT / 'templates'), 'templates'),
     (str(ROOT / '.env.example'), '.'),
+    (str(ROOT / 'app_icon.ico'), '.'),  # 실행 앱 favicon(BUNDLE_DIR/app_icon.ico)용 — frozen 빌드에서도 살리기
 ]
 
 block_cipher = None
