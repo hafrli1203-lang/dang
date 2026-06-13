@@ -613,6 +613,20 @@ body, .q-page {
     border-color: var(--dg-text-primary);
 }
 
+/* == 당근식 컨텍스트 스위처 (사이드바 상단 매장→캠페인) == */
+.dg-context-switcher {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 10px 14px 12px;
+    border-bottom: 1px solid var(--dg-border);
+    margin-bottom: 4px;
+}
+.dg-context-caption {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.2px;
+    color: var(--dg-text-caption);
+    margin: 4px 0 0 2px;
+}
+.dg-context-select { margin-top: 0 !important; }
+
 /* == Project List == */
 .dg-project-item {
     display: flex !important; align-items: center !important; gap: 10px !important;

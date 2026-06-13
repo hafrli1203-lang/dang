@@ -1,7 +1,7 @@
 """Shared UI components for all pages."""
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import ui, app as nicegui_app
 
 from app.export_manager import ExportManager
 from app.theme import inject_theme, section_header  # noqa: F401
@@ -48,6 +48,64 @@ NAV_PAGES = [item for _, items in NAV_SECTIONS for item in items]
 _PAGE_TITLES = {path: name for _, items in NAV_SECTIONS for _icon, name, path in items}
 
 
+def _render_context_switcher() -> None:
+    """사이드바 상단 당근식 매장→캠페인 스위처.
+
+    매장/캠페인을 바꾸면 current_project_id를 갱신하고 reload — 어느 페이지에 있든
+    그 컨텍스트로 기획/썸네일/보고서가 동작한다. 데이터/스키마 변경 없음.
+    """
+    from app.database import get_projects
+
+    projects = get_projects()
+    with ui.element("div").classes("dg-context-switcher w-full"):
+        if not projects:
+            ui.label("등록된 매장이 없어요").classes("dg-text-sm")
+            ui.button(
+                "새 프로젝트", icon="add", color=None,
+                on_click=lambda: ui.navigate.to("/"),
+            ).props("flat dense no-caps").classes("dg-quick-link")
+            return
+
+        cur_pid = nicegui_app.storage.user.get("current_project_id")
+        cur = next((p for p in projects if p["id"] == cur_pid), None) or projects[0]
+        cur_store = cur["name"]
+
+        # 매장 목록(최초 등장 순) + 현재 매장의 캠페인들
+        stores, seen = [], set()
+        for p in projects:
+            if p["name"] not in seen:
+                seen.add(p["name"])
+                stores.append(p["name"])
+        store_campaigns = [p for p in projects if p["name"] == cur_store]
+
+        def _switch_store(e) -> None:
+            if not e.value or e.value == cur_store:
+                return
+            first = next((p for p in projects if p["name"] == e.value), None)
+            if first:
+                nicegui_app.storage.user["current_project_id"] = first["id"]
+                ui.navigate.reload()
+
+        def _switch_campaign(e) -> None:
+            if e.value and e.value != cur["id"]:
+                nicegui_app.storage.user["current_project_id"] = e.value
+                ui.navigate.reload()
+
+        ui.label("매장").classes("dg-context-caption")
+        ui.select(
+            stores, value=cur_store, on_change=_switch_store,
+        ).props("outlined dense options-dense").classes("w-full dg-context-select")
+
+        camp_opts = {
+            p["id"]: (p.get("campaign_name") or "캠페인명 미입력")
+            for p in store_campaigns
+        }
+        ui.label("캠페인").classes("dg-context-caption")
+        ui.select(
+            camp_opts, value=cur["id"], on_change=_switch_campaign,
+        ).props("outlined dense options-dense").classes("w-full dg-context-select")
+
+
 def create_nav(current: str) -> None:
     inject_theme()
 
@@ -83,6 +141,9 @@ def create_nav(current: str) -> None:
                 "font-size: 15px; font-weight: 800; letter-spacing: -0.4px;"
                 "color: var(--dg-text-primary)"
             )
+
+        # ── 당근식 컨텍스트 스위처: 매장 → 캠페인 (어느 페이지든 현재 작업 대상 고정·전환) ──
+        _render_context_switcher()
 
         # Nav sections (구분선만)
         for section_idx, (_section_label, items) in enumerate(NAV_SECTIONS):
