@@ -398,11 +398,29 @@ def build_wizard_ui(
 
                     _render_current_ad_card()
 
+                    # 원클릭 통합 기획 — 자료 넣으면 4단계 한 번에
+                    with ui.column().classes("w-full items-center gap-1"):
+                        full_btn = ui.button(
+                            "전체 기획 한 번에 생성", icon="bolt",
+                            on_click=lambda: _generate_full_plan(),
+                        ).classes("dg-btn-primary")
+                        ui.label(
+                            "전략 → 소식글·제목·쿠폰 → 광고 세팅 → 운영 제안서를 자동으로 이어서 만들어요. (단계별 편집은 그대로 가능)"
+                        ).classes("dg-hint").style("text-align: center")
+                        full_spinner = ui.spinner(size="24px").classes("hidden")
+                        full_status = ui.label("").classes("dg-progress-text hidden")
+                    _wizard_state["_full_btn"] = full_btn
+                    _wizard_state["_full_spinner"] = full_spinner
+                    _wizard_state["_full_status"] = full_status
+
+                    ui.separator().classes("w-full my-1")
+                    ui.label("또는 단계별로 — 전략만 먼저").classes("dg-label-sm").style("text-align: center")
+
                     with ui.row().classes("gap-3 items-center"):
                         gen_strategy_btn = ui.button(
-                            "전략 분석 생성", icon="auto_awesome",
+                            "전략 분석만 생성", icon="auto_awesome",
                             on_click=lambda: _generate_strategy(),
-                        ).classes("dg-btn-primary")
+                        ).classes("dg-btn-secondary")
                         s1_spinner = ui.spinner(size="28px").classes("hidden")
                         s1_status = ui.label("").classes("dg-progress-text hidden")
 
@@ -604,6 +622,45 @@ def build_wizard_ui(
 
             # Navigation
             _render_export_bar(1)
+
+    async def _generate_full_plan() -> None:
+        """원클릭 통합 기획 — 전략→소식글→세팅→제안서를 순차 생성 후 제안서로 이동."""
+        pid = nicegui_app.storage.user.get("current_project_id")
+        if not pid:
+            ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
+            return
+        from app import planning_pipeline
+
+        engine = engine_radio.value
+        btn = _wizard_state.get("_full_btn")
+        spinner = _wizard_state.get("_full_spinner")
+        status = _wizard_state.get("_full_status")
+        if btn:
+            btn.props("disabled loading")
+        if spinner:
+            spinner.classes(remove="hidden")
+        if status:
+            status.classes(remove="hidden")
+            status.set_text("준비 중...")
+
+        def _progress(msg: str) -> None:
+            if status:
+                status.set_text(msg)
+
+        try:
+            await planning_pipeline.generate_full_plan(pid, engine=engine, on_progress=_progress)
+            ui.notify("전체 기획이 완성됐어요! 운영 제안서로 이동할게요.", type="positive", timeout=6000)
+            ui.navigate.to("/plan/proposal")
+        except Exception as exc:
+            _log.exception("통합 기획 생성 실패: %s", exc)
+            ui.notify("통합 기획을 만들지 못했어요. 잠시 후 다시 시도해 주세요.", type="negative", timeout=8000)
+            if status:
+                status.set_text("오류가 났어요. 다시 시도해 주세요.")
+        finally:
+            if btn:
+                btn.props(remove="disabled loading")
+            if spinner:
+                spinner.classes("hidden")
 
     async def _generate_strategy() -> None:
         pid = nicegui_app.storage.user.get("current_project_id")
