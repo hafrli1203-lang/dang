@@ -13,6 +13,7 @@ from collections import OrderedDict, defaultdict
 from nicegui import ui, app as nicegui_app
 
 from app.common import create_nav, safe_download, next_step_bar
+from app import store_wiki
 from app.database import (
     get_projects,
     get_project,
@@ -501,6 +502,24 @@ def project_page() -> None:
                                     shown += 1
                     if not shown:
                         ui.label("저장된 썸네일이 없어요. (썸네일 제작에서 생성·저장)").classes("dg-text-sm")
+            with ui.expansion("매장 위키 — AI가 참고하는 매장 지식", icon="menu_book").classes(
+                "w-full dg-card-flat mt-3"
+            ):
+                ui.label(
+                    "전략·소식글·보고서를 만들 때 AI가 먼저 읽는 매장 사실/패턴이에요. "
+                    "사장님이 직접 고치면 그대로 반영돼요. (예: 추적 한계, 효율 좋았던 미끼/소재)"
+                ).classes("dg-hint mb-2")
+                _wiki_area = ui.textarea(value=store_wiki.ensure_wiki(pid, p)).classes(
+                    "w-full dg-input"
+                ).props("rows=12 outlined dense")
+
+                def _save_wiki(_e=None, _pid=pid, _area=_wiki_area) -> None:
+                    store_wiki.save_wiki(_pid, _area.value or "")
+                    ui.notify("매장 위키를 저장했어요.", type="positive")
+
+                ui.button("위키 저장", icon="save", on_click=_save_wiki).classes(
+                    "dg-btn-primary dg-btn-sm mt-2"
+                )
             with ui.row().classes("w-full mt-3 gap-1 items-center"):
                 ui.button("기획", icon="edit_note", color=None,
                           on_click=lambda: _go(pid, "/plan/strategy")).props("flat no-caps").classes("dg-quick-link")

@@ -190,10 +190,19 @@ def _render_planning(route: str, initial_step: int) -> None:
             with ui.row().classes("items-start gap-8 flex-wrap"):
                 with ui.column().classes("gap-1"):
                     ui.label("AI 엔진").classes("dg-label-sm")
+                    # 엔진 역할 분담: 기획·세팅·제안서(구조·논리)는 조율(Claude+GPT 병렬→Claude 종합),
+                    # 소식글(글·카피)은 Claude 단독(정철 voice). step2만 글.
+                    _default_engine = "claude" if initial_step == 2 else "coordinate"
                     engine_radio = ui.radio(
                         {"claude": "Claude", "gpt": "GPT", "coordinate": "Claude+GPT 조율"},
-                        value="claude",
+                        value=_default_engine,
                     ).props("inline").classes("dg-radio")
+                    _engine_hint = (
+                        "소식글은 Claude가 직접 씁니다 (필요시 변경)"
+                        if initial_step == 2
+                        else "기획·세팅은 Claude+GPT 조율을 기본으로 합니다 (필요시 변경)"
+                    )
+                    ui.label(_engine_hint).classes("dg-hint")
 
                 with ui.column().classes("gap-1"):
                     ui.label("프롬프트 카테고리").classes("dg-label-sm")

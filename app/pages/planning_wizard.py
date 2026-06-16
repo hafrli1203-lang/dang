@@ -43,6 +43,7 @@ from app.database import (
     save_setting,
     delete_setting,
 )
+from app import store_wiki
 from app.logger import get_logger
 
 _log = get_logger("planning_wizard")
@@ -641,7 +642,10 @@ def build_wizard_ui(
             status.set_text("전략 분석을 만들고 있어요...")
 
         try:
-            guide, prompt = build_strategy_prompt(project, current_ad=_collect_current_ad())
+            guide, prompt = build_strategy_prompt(
+                project, current_ad=_collect_current_ad(),
+                wiki=store_wiki.wiki_context(pid, project),
+            )
             loop = asyncio.get_running_loop()
             if engine == "coordinate":
                 from app.ai.coordination import coordinate_generate
@@ -707,7 +711,10 @@ def build_wizard_ui(
             regen_status.set_text("다시 만들고 있어요...")
 
         try:
-            guide, prompt = build_strategy_prompt(project, current_ad=_collect_current_ad())
+            guide, prompt = build_strategy_prompt(
+                project, current_ad=_collect_current_ad(),
+                wiki=store_wiki.wiki_context(pid, project),
+            )
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
             if _wizard_state["step1_content"]:
@@ -1307,6 +1314,7 @@ def build_wizard_ui(
                         engine=engine if engine not in ("both", "coordinate") else "",
                         strategy_context=strategy_ctx,
                         current_ad=cur_ad,
+                    wiki=store_wiki.wiki_context(pid, project),
                     )
                     _custom = get_setting("custom_system_prompt")
                     if _custom:
@@ -1324,11 +1332,13 @@ def build_wizard_ui(
                             project, extra, category=cat, strategy=strat, engine="claude",
                             strategy_context=strategy_ctx,
                             current_ad=cur_ad,
+                    wiki=store_wiki.wiki_context(pid, project),
                         )
                         gpt_guide, _ = build_planning_prompt(
                             project, extra, category=cat, strategy=strat, engine="gpt",
                             strategy_context=strategy_ctx,
                             current_ad=cur_ad,
+                    wiki=store_wiki.wiki_context(pid, project),
                         )
                         if _custom:
                             claude_guide = _custom
@@ -1429,6 +1439,7 @@ def build_wizard_ui(
                         project, extra_input.value, category=cat, strategy=strat,
                         engine=engine, strategy_context=strategy_ctx,
                         current_ad=cur_ad,
+                    wiki=store_wiki.wiki_context(pid, project),
                     )
                     _custom = get_setting("custom_system_prompt")
                     if _custom:
@@ -1889,6 +1900,7 @@ def build_wizard_ui(
                 content_context=_wizard_state.get("step2_content", ""),
                 budget_plan_context=_wizard_state.get("budget_plan_text", ""),
                 current_ad=_collect_current_ad(),
+                wiki=store_wiki.wiki_context(pid, project),
             )
             loop = asyncio.get_running_loop()
             if engine == "coordinate":
@@ -1958,6 +1970,7 @@ def build_wizard_ui(
                 content_context=_wizard_state.get("step2_content", ""),
                 budget_plan_context=_wizard_state.get("budget_plan_text", ""),
                 current_ad=_collect_current_ad(),
+                wiki=store_wiki.wiki_context(pid, project),
             )
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"

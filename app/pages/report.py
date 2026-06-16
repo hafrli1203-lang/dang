@@ -19,6 +19,8 @@ from app.database import (
     save_report_content,
 )
 from app.ai_engine import build_report_prompt, calc_kpi, SYSTEM_GUIDE_REPORT
+from app import store_wiki
+from app import knowledge
 from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.reporting.docx_report import build_report_docx
 from app.reporting.parsers import parse_daangn_csv
@@ -1149,14 +1151,17 @@ def report_page() -> None:
 
             try:
                 _set_step("1/4 보고서 작성을 준비하고 있어요...")
-                prompt = build_report_prompt(project, rows, kpi, extra)
+                prompt = build_report_prompt(
+                    project, rows, kpi, extra,
+                    wiki=store_wiki.wiki_context(pid, project, kpi),
+                )
                 loop = asyncio.get_running_loop()
 
                 if page_state["cancelled"]:
                     ui.notify("생성을 중단했어요.", type="warning")
                     return
 
-                guide = SYSTEM_GUIDE_REPORT
+                guide = SYSTEM_GUIDE_REPORT + knowledge.domain_knowledge("report")
                 if engine == "coordinate":
                     from app.ai.coordination import synthesize
                     _set_step("2/4 Claude와 GPT가 각자 초안을 쓰고 있어요...")
@@ -1190,6 +1195,14 @@ def report_page() -> None:
                 page_state["report_content"] = content
                 page_state["engine"] = engine
                 save_report_content(pid, engine, content)
+                # 누적 루프: 이번 분석의 병목·검증 패턴을 매장 위키에 자동 반영
+                try:
+                    _period = (
+                        f"{rows[0]['period_label']}~{rows[-1]['period_label']}" if rows else ""
+                    )
+                    store_wiki.update_wiki_from_report(pid, project, kpi, content, period=_period)
+                except Exception:
+                    _report_log.exception("매장 위키 자동 갱신 실패 (보고서는 정상 저장됨)")
                 report_md.set_content(content)
                 _render_judgment_table(content)
                 report_card.classes(remove="hidden")

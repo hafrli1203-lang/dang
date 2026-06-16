@@ -54,3 +54,6 @@ Thumbs.db
 # Tool artifacts
 .code-review-graph/
 *.log
+
+# 교재 원문(저작권) — 정제본(distilled_*.md)만 커밋
+app/knowledge/raw/

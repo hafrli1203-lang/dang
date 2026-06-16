@@ -250,7 +250,7 @@ def get_latest_content(
     with get_conn() as conn:
         row = conn.execute(
             """SELECT * FROM generated_content WHERE project_id=? AND content_type=?
-               ORDER BY created_at DESC LIMIT 1""",
+               ORDER BY created_at DESC, id DESC LIMIT 1""",
             (project_id, content_type),
         ).fetchone()
         return dict(row) if row else None
