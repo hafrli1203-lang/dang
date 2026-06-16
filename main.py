@@ -33,6 +33,7 @@ import app.pages.planning  # noqa: F401
 import app.pages.report    # noqa: F401
 import app.pages.thumbnail  # noqa: F401
 import app.pages.analysis  # noqa: F401
+import app.pages.research   # noqa: F401
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 from nicegui import ui, app as nicegui_app

@@ -684,6 +684,8 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
     period_first: str | None = None
     period_last: str | None = None
     age_gender_accum: dict[tuple[str, str], dict[str, int]] = {}
+    ts_accum: dict[str, dict[str, int]] = {}
+    metrics_available: set[str] = set()
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -704,6 +706,8 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
             result["campaigns"].extend(campaigns)
             # 성별 컬럼이 있으면 (연령 × 성별) 조인 셀도 누적 (히트맵용).
             _accumulate_age_gender(header, data_rows, age_gender_accum)
+            # 날짜별 timeseries 누적 (퍼널/KPI 대시보드용).
+            _accumulate_timeseries(header, data_rows, ts_accum, metrics_available)
             if p_first and (period_first is None or p_first < period_first):
                 period_first = p_first
             if p_last and (period_last is None or p_last > period_last):
@@ -764,6 +768,8 @@ def parse_demographic_xlsx(content: bytes) -> dict[str, list[Segment] | list[Cam
                 result["genders" if kind == "gender" else "ages"].append(seg)
 
     result["age_gender_cells"] = _finalize_age_gender(age_gender_accum)
+    result["timeseries"] = _finalize_timeseries(ts_accum)
+    result["metrics_available"] = sorted(metrics_available)
     result["meta"] = {
         "period_first": period_first or "",
         "period_last": period_last or "",
@@ -878,18 +884,62 @@ _ACTION_KEYWORDS = (
 )
 
 
+def _breakdown_action_cols(header: list[str]) -> list[int]:
+    """Indices of raw action-count columns (총행동 합산 대상).
+
+    Excludes derived columns (단골당 비용 / CPA / CVR) so only counts are summed.
+    """
+    return [
+        idx for idx, h in enumerate(header)
+        if any(kw.replace(" ", "") in h.replace(" ", "") for kw in _ACTION_KEYWORDS)
+        and "CPA" not in h and "CVR" not in h
+        and "비용" not in h  # exclude '단골당 비용' etc.
+    ]
+
+
+def _breakdown_metric_cols(header: list[str]) -> dict[str, list[int]]:
+    """Locate raw-count columns per funnel/KPI category.
+
+    Derived columns (비용/CPA/CVR/CPC/CPM/율) are excluded so only counts are
+    summed. Categories with no matching column stay empty → caller marks them
+    as "데이터 없음" instead of fabricating zeros as if measured.
+    """
+
+    def _cols(*keywords: str) -> list[int]:
+        out: list[int] = []
+        for idx, h in enumerate(header):
+            if any(bad in h for bad in ("비용", "CPA", "CVR", "CPC", "CPM")):
+                continue
+            if h.endswith("율"):  # 클릭률 등 비율 컬럼 제외
+                continue
+            hn = h.replace(" ", "")
+            if any(kw.replace(" ", "") in hn for kw in keywords):
+                out.append(idx)
+        return out
+
+    return {
+        "impressions": _cols("노출"),
+        "clicks": _cols("클릭 수", "클릭수"),
+        "inquiries": _cols("전화 문의", "채팅 문의", "문의", "상담", "대화"),
+        "regulars": _cols("단골"),
+        "coupons": _cols("쿠폰"),
+    }
+
+
 def _is_breakdown_format(header: list[str]) -> bool:
     """Detect 당근 광고관리자 직접 내보내기 (long-format) layout.
 
-    Signature: header contains 캠페인 + 연령 + 비용 columns simultaneously, which
-    only happens in the breakdown sheet (cross-tabulated rows).
+    Signature: per-day rows carrying 캠페인 + 비용 + 기간 columns. 연령 is
+    OPTIONAL — real exports often omit it (e.g. 캠페인별 일자 추이만 내보낸 경우),
+    and we still want to roll those up by campaign + date instead of treating each
+    day as a separate campaign. The 기간 column is what distinguishes a long-format
+    breakdown from the pre-aggregated per-sheet template (which has no 기간).
     """
     joined = " ".join(header)
     has_campaign = "캠페인" in joined
-    has_age = "연령" in joined
     has_cost = "비용" in joined
     has_period = "기간" in joined or "날짜" in joined
-    return has_campaign and has_age and has_cost and has_period
+    return has_campaign and has_cost and has_period
 
 
 def _find_breakdown_col(header: list[str], *keywords: str) -> int | None:
@@ -946,14 +996,10 @@ def _aggregate_breakdown(
     col_click = _find_breakdown_col(header, "클릭 수", "클릭수")
     col_period = _find_breakdown_col(header, "기간", "날짜")
 
-    action_cols = [
-        idx for idx, h in enumerate(header)
-        if any(kw.replace(" ", "") in h.replace(" ", "") for kw in _ACTION_KEYWORDS)
-        and "CPA" not in h and "CVR" not in h
-        and "비용" not in h  # exclude '단골당 비용' etc.
-    ]
+    action_cols = _breakdown_action_cols(header)
 
-    if col_age is None or col_cost is None:
+    # 연령 컬럼이 없어도 캠페인 집계는 진행한다(있는 것만). 비용 컬럼만 필수.
+    if col_cost is None:
         return [], [], None, None
 
     age_accum: dict[str, dict[str, int]] = {}
@@ -1033,6 +1079,59 @@ def _aggregate_breakdown(
         )
 
     return ages, campaigns, period_first, period_last
+
+
+_TIMESERIES_KEYS = (
+    "cost", "impressions", "clicks", "actions",
+    "inquiries", "regulars", "coupons",
+)
+
+
+def _accumulate_timeseries(
+    header: list[str],
+    data_rows: list[tuple],
+    ts_accum: dict[str, dict[str, int]],
+    available: set[str],
+) -> None:
+    """Roll long-format rows up by 기간(date) for the funnel/KPI dashboard.
+
+    Mutates ``ts_accum`` (date → metric totals) and ``available`` (set of metric
+    categories that actually had a source column). Categories never seen stay out
+    of ``available`` so the UI can show "데이터 없음" instead of a fake 0.
+    """
+    col_period = _find_breakdown_col(header, "기간", "날짜")
+    col_cost = _find_breakdown_col(header, "비용")
+    if col_period is None or col_cost is None:
+        return
+
+    metric_cols = _breakdown_metric_cols(header)
+    for cat, cols in metric_cols.items():
+        if cols:
+            available.add(cat)
+    action_cols = _breakdown_action_cols(header)
+    if action_cols:
+        available.add("actions")
+
+    for row in data_rows:
+        if not row or all(c is None or str(c).strip() == "" for c in row):
+            continue
+        date = _normalize_period_cell(row, col_period)
+        if not date or date in {"합계", "Total", "소계"}:
+            continue
+        acc = ts_accum.setdefault(date, {k: 0 for k in _TIMESERIES_KEYS})
+        acc["cost"] += _cell_int(row, col_cost)
+        for cat, cols in metric_cols.items():
+            acc[cat] += sum(_cell_int(row, c) for c in cols)
+        acc["actions"] += sum(_cell_int(row, c) for c in action_cols)
+
+
+def _finalize_timeseries(
+    ts_accum: dict[str, dict[str, int]],
+) -> list[dict[str, object]]:
+    return [
+        {"date": date, **{k: vals[k] for k in _TIMESERIES_KEYS}}
+        for date, vals in sorted(ts_accum.items())
+    ]
 
 
 # ───────────────────── age × gender joint (heatmap) ─────────────────────

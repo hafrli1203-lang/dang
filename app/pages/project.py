@@ -12,7 +12,7 @@ from collections import OrderedDict, defaultdict
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav, safe_download
+from app.common import create_nav, safe_download, next_step_bar
 from app.database import (
     get_projects,
     get_project,
@@ -230,6 +230,7 @@ def project_page() -> None:
 
     # ══════════════════ 페이지 레이아웃 ══════════════════
     with ui.column().classes("dg-page-content w-full gap-4"):
+        next_step_bar("/")  # CSS order로 본문 맨 아래에 '다음 단계' 흐름 버튼
 
         # 헤더 한 줄: 제목 + 검색 + 데이터 관리 + 새 프로젝트
         with ui.row().classes("w-full items-end gap-3 flex-wrap"):
@@ -349,7 +350,7 @@ def project_page() -> None:
                                             ui.button(
                                                 icon="edit_note", color=None,
                                             ).props("flat round dense").classes("dg-quick-link").on(
-                                                "click.stop", lambda _, _pid=pid: _go(_pid, "/planning")
+                                                "click.stop", lambda _, _pid=pid: _go(_pid, "/plan/strategy")
                                             ).tooltip("기획")
                                             ui.button(
                                                 icon="assessment", color=None,
@@ -502,7 +503,7 @@ def project_page() -> None:
                         ui.label("저장된 썸네일이 없어요. (썸네일 제작에서 생성·저장)").classes("dg-text-sm")
             with ui.row().classes("w-full mt-3 gap-1 items-center"):
                 ui.button("기획", icon="edit_note", color=None,
-                          on_click=lambda: _go(pid, "/planning")).props("flat no-caps").classes("dg-quick-link")
+                          on_click=lambda: _go(pid, "/plan/strategy")).props("flat no-caps").classes("dg-quick-link")
                 ui.button("성과", icon="assessment", color=None,
                           on_click=lambda: _go(pid, "/report")).props("flat no-caps").classes("dg-quick-link")
                 ui.button("수정", icon="edit", color=None,

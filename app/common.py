@@ -33,7 +33,11 @@ async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
 NAV_SECTIONS = [
     ("제작", [
         ("folder_open", "프로젝트 관리", "/"),
-        ("edit_note", "광고 기획", "/planning"),
+        ("travel_explore", "커뮤니티 리서치", "/research"),
+        ("analytics", "전략 분석", "/plan/strategy"),
+        ("article", "소식글·제목·쿠폰", "/plan/content"),
+        ("tune", "광고 세팅", "/plan/adset"),
+        ("description", "운영 제안서", "/plan/proposal"),
         ("image", "썸네일 제작", "/thumbnail"),
     ]),
     ("분석", [
@@ -44,6 +48,22 @@ NAV_SECTIONS = [
 
 # 하위 호환 (다른 모듈에서 참조할 수 있음)
 NAV_PAGES = [item for _, items in NAV_SECTIONS for item in items]
+
+# 워크플로우 단계 — 기능을 '따로 노는 메뉴'가 아니라 하나의 여정으로 잇는다.
+# (한전ON·쿠팡검증식 가로 스텝 네비게이션. 모든 페이지 상단에 공통 표시.)
+# (아이콘, 단계명, 부제, 경로)
+WORKFLOW_STEPS = [
+    ("storefront", "매장·캠페인", "작업 대상 선택", "/"),
+    ("travel_explore", "커뮤니티 리서치", "고객 반응·표현 수집", "/research"),
+    ("analytics", "전략 분석", "타겟·경쟁·방향", "/plan/strategy"),
+    ("article", "소식글·제목·쿠폰", "콘텐츠 생성", "/plan/content"),
+    ("tune", "광고 세팅", "캠페인·예산·소재", "/plan/adset"),
+    ("description", "운영 제안서", "종합 제안", "/plan/proposal"),
+    ("image", "썸네일 제작", "광고 이미지", "/thumbnail"),
+    ("assessment", "성과 보고서", "결과 측정", "/report"),
+    ("insights", "고급 분석", "심화 진단", "/analysis"),
+]
+_STEP_INDEX = {path: i for i, (_ic, _nm, _sub, path) in enumerate(WORKFLOW_STEPS)}
 
 _PAGE_TITLES = {path: name for _, items in NAV_SECTIONS for _icon, name, path in items}
 
@@ -106,24 +126,54 @@ def _render_context_switcher() -> None:
         ).props("outlined dense options-dense").classes("w-full dg-context-select")
 
 
+def _render_workflow_steps(current: str) -> None:
+    """한전ON·쿠팡검증식 가로 워크플로우 스텝 바.
+
+    기능을 따로 노는 메뉴가 아니라 ①매장 → ②기획 → ③리서치 → ④썸네일 →
+    ⑤성과 → ⑥분석으로 잇는다. 현재 단계는 강조, 지나온 단계는 완료(체크) 표시,
+    각 스텝 클릭 시 해당 페이지로 이동. 모든 페이지 상단에 공통으로 표시된다.
+    """
+    cur_idx = _STEP_INDEX.get(current, -1)
+    with ui.element("div").classes("dg-wf"):
+        with ui.element("div").classes("dg-wf-track"):
+            for i, (icon, name, sub, path) in enumerate(WORKFLOW_STEPS):
+                state = "active" if i == cur_idx else ("done" if (cur_idx >= 0 and i < cur_idx) else "todo")
+                with ui.element("div").classes(f"dg-wf-step {state}").on(
+                    "click", lambda p=path: ui.navigate.to(p)
+                ):
+                    with ui.element("div").classes("dg-wf-badge"):
+                        if state == "done":
+                            ui.icon("check", size="15px")
+                        else:
+                            ui.label(str(i + 1))
+                    with ui.element("div").classes("dg-wf-text"):
+                        ui.label(name).classes("dg-wf-name")
+                        ui.label(sub).classes("dg-wf-sub")
+                if i < len(WORKFLOW_STEPS) - 1:
+                    ui.element("div").classes("dg-wf-line")
+
+
 def create_nav(current: str) -> None:
     inject_theme()
 
-    # -- Header --
+    # -- Header (2단: 브랜드 줄 + 워크플로우 스텝 줄) --
     with ui.header().classes("dg-header"):
-        with ui.row().classes("w-full items-center px-4 h-full gap-1"):
-            ui.button(
-                icon="menu",
-                on_click=lambda: drawer.toggle(),
-            ).props("flat round dense").style("color: var(--dg-text-secondary)")
-            ui.label("당근 광고 도우미").classes("dg-logo ml-1")
-            if current in _PAGE_TITLES:
-                ui.icon("chevron_right", size="16px").style("color: var(--dg-text-caption)")
-                ui.label(_PAGE_TITLES[current]).style(
-                    "font-size: 13px; font-weight: 600; color: var(--dg-text-secondary)"
-                )
-            ui.space()
-            ui.label(f"v{_get_version()}").classes("dg-header-version")
+        with ui.column().classes("w-full gap-0"):
+            with ui.row().classes("w-full items-center px-4 gap-1 dg-header-brand"):
+                ui.button(
+                    icon="menu",
+                    on_click=lambda: drawer.toggle(),
+                ).props("flat round dense").style("color: var(--dg-text-secondary)")
+                ui.label("당근 광고 도우미").classes("dg-logo ml-1")
+                if current in _PAGE_TITLES:
+                    ui.icon("chevron_right", size="16px").style("color: var(--dg-text-caption)")
+                    ui.label(_PAGE_TITLES[current]).style(
+                        "font-size: 13px; font-weight: 600; color: var(--dg-text-secondary)"
+                    )
+                ui.space()
+                ui.label(f"v{_get_version()}").classes("dg-header-version")
+            # 워크플로우 스텝 바 — 어느 페이지든 현재 위치 + 전체 흐름을 보여준다.
+            _render_workflow_steps(current)
 
     # -- Sidebar --
     drawer = ui.left_drawer(value=True, fixed=True, bordered=False).classes("dg-sidebar")
@@ -145,26 +195,12 @@ def create_nav(current: str) -> None:
         # ── 당근식 컨텍스트 스위처: 매장 → 캠페인 (어느 페이지든 현재 작업 대상 고정·전환) ──
         _render_context_switcher()
 
-        # Nav sections (구분선만)
-        for section_idx, (_section_label, items) in enumerate(NAV_SECTIONS):
-            if section_idx > 0:
-                ui.separator().style(
-                    "border-color: var(--dg-border); margin: 10px 18px"
-                )
-            else:
-                ui.element("div").style("height: 10px")
-            for icon, name, path in items:
-                active = current == path
-                # color=None: Quasar의 text-primary(!important) 강제 적용을 막아
-                # 비활성 메뉴가 오렌지로 보이지 않게 한다.
-                ui.button(
-                    name,
-                    icon=icon,
-                    color=None,
-                    on_click=lambda p=path: ui.navigate.to(p),
-                ).classes(
-                    "dg-nav-item" + (" active" if active else "")
-                ).props("flat no-caps align=left")
+        # 페이지 네비게이션은 상단 워크플로우 스텝 바가 전담한다(중복 제거).
+        # 사이드바는 '현재 작업 대상(매장·캠페인)'에 집중. 진행 현황만 가볍게 안내.
+        ui.element("div").style("height: 6px")
+        with ui.element("div").classes("dg-sidebar-hint"):
+            ui.icon("alt_route", size="16px")
+            ui.label("상단 단계 바에서 다음 작업으로 이동하세요")
 
         # Spacer + footer
         ui.space()
@@ -174,6 +210,43 @@ def create_nav(current: str) -> None:
             ui.label(f"당근 광고 도우미 v{_get_version()}").style(
                 "font-size: 11px; color: var(--dg-text-caption)"
             )
+
+
+def next_step_bar(current: str) -> None:
+    """페이지 본문 끝에서 호출 — 다음 단계로 이어주는 흐름 버튼(한전·쿠팡검증식).
+
+    현재 단계 기준으로 이전/다음 워크플로우 단계를 좌우에 배치해, 사용자가
+    '다음에 뭘 하면 되는지'를 화면이 안내한다(따로 노는 메뉴 → 이어지는 여정).
+    마지막 단계면 다음 버튼을 숨긴다.
+    """
+    idx = _STEP_INDEX.get(current, -1)
+    if idx < 0:
+        return
+    prev_step = WORKFLOW_STEPS[idx - 1] if idx > 0 else None
+    next_step = WORKFLOW_STEPS[idx + 1] if idx < len(WORKFLOW_STEPS) - 1 else None
+    if not prev_step and not next_step:
+        return
+    with ui.element("div").classes("dg-nextbar w-full"):
+        if prev_step:
+            _ic, nm, _sub, path = prev_step
+            with ui.element("div").classes("dg-nextbar-btn prev").on(
+                "click", lambda p=path: ui.navigate.to(p)
+            ):
+                ui.icon("arrow_back", size="18px")
+                with ui.element("div").classes("dg-nextbar-text"):
+                    ui.label("이전 단계").classes("dg-nextbar-label")
+                    ui.label(nm).classes("dg-nextbar-name")
+        else:
+            ui.element("div")  # 좌측 자리 채움(우측 정렬 유지)
+        if next_step:
+            _ic, nm, _sub, path = next_step
+            with ui.element("div").classes("dg-nextbar-btn next").on(
+                "click", lambda p=path: ui.navigate.to(p)
+            ):
+                with ui.element("div").classes("dg-nextbar-text"):
+                    ui.label("다음 단계").classes("dg-nextbar-label")
+                    ui.label(nm).classes("dg-nextbar-name")
+                ui.icon("arrow_forward", size="18px")
 
 
 def project_selector(label: str = "프로젝트 선택") -> ui.select:

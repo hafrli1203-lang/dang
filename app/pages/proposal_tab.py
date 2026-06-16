@@ -208,7 +208,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                 news_post = ""
                 pid = nicegui_app.storage.user.get("current_project_id")
                 if pid:
-                    planning_content = get_latest_content(pid, content_type="planning")
+                    planning_content = get_latest_content(pid, content_type="content") or get_latest_content(pid, content_type="planning")
                     if planning_content:
                         blocks = _split_blocks(planning_content["content"])
                         parts = []
@@ -341,7 +341,7 @@ def build_proposal_tab() -> None:  # noqa: C901
                     pid = nicegui_app.storage.user.get("current_project_id")
                     cur_engine = engine
                     if pid:
-                        planning_content = get_latest_content(pid, content_type="planning")
+                        planning_content = get_latest_content(pid, content_type="content") or get_latest_content(pid, content_type="planning")
                         if planning_content:
                             blocks = _split_blocks(planning_content["content"])
                             parts = []

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav
+from app.common import create_nav, next_step_bar
 from app.theme import section_header
 from app.export_manager import ExportManager
 from app.paths import THUMBNAILS_DIR, sanitize_filename
@@ -29,6 +29,7 @@ def thumbnail_page() -> None:
     _MAX_HISTORY = 10
 
     with ui.column().classes("dg-page-content w-full gap-5"):
+        next_step_bar("/thumbnail")  # CSS order로 본문 맨 아래에 '다음 단계' 흐름 버튼
 
         # Page header
         ui.label("썸네일 제작").classes("dg-page-title")

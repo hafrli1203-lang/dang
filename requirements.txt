@@ -8,6 +8,14 @@ openpyxl>=3.1.0
 python-docx>=1.1.0
 matplotlib>=3.8.0
 Pillow>=10.0.0
+# 커뮤니티 리서치 (검색 → 본문/댓글 수집 → AI 분석)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+readability-lxml>=0.8.1
+lxml>=5.0.0
+# playwright는 선택 — 커뮤니티 본문 수집 + 경쟁 광고 관측(observe-ads)에 필요. 미설치면 HTTP만/광고관측 비활성.
+# pip install playwright playwright-stealth && playwright install chromium
+# playwright-stealth는 봇 우회 강화(메타 광고 라이브러리 등). 미설치면 기본 init script로 폴백.
 # pywebview is optional — needed only for native desktop window mode.
 # Install separately if desired: pip install pywebview
 # On Windows it additionally requires: pip install pywebview[cef]  (or msedge-selenium-tools)

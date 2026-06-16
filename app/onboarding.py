@@ -10,10 +10,10 @@ from dataclasses import dataclass
 # (key, 라벨, 설명, 이동 경로, flags 키)
 _STEP_DEFS: tuple[tuple[str, str, str, str, str], ...] = (
     ("project", "프로젝트 만들기", "광고할 가게 정보를 등록해요", "/", "has_project"),
-    ("strategy", "전략 분석", "타겟·경쟁·전략 방향을 AI가 잡아줘요", "/planning", "has_strategy"),
-    ("planning", "기획 콘텐츠 생성", "소식글·카피·썸네일 가이드를 만들어요", "/planning", "has_planning"),
-    ("ad_settings", "광고 세팅", "캠페인 구조·타겟팅·예산을 설계해요", "/planning", "has_ad_settings"),
-    ("proposal", "운영 제안서", "광고주에게 줄 종합 제안서를 뽑아요", "/planning", "has_proposal"),
+    ("strategy", "전략 분석", "타겟·경쟁·전략 방향을 AI가 잡아줘요", "/plan/strategy", "has_strategy"),
+    ("planning", "기획 콘텐츠 생성", "소식글·카피·썸네일 가이드를 만들어요", "/plan/content", "has_planning"),
+    ("ad_settings", "광고 세팅", "캠페인 구조·타겟팅·예산을 설계해요", "/plan/adset", "has_ad_settings"),
+    ("proposal", "운영 제안서", "광고주에게 줄 종합 제안서를 뽑아요", "/plan/proposal", "has_proposal"),
     ("report", "성과 분석", "집행 결과를 올려 퍼널·CPA를 분석해요", "/report", "has_report"),
 )
 

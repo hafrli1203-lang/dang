@@ -7,7 +7,7 @@ from pathlib import Path
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav, no_project_notice
+from app.common import create_nav, no_project_notice, next_step_bar
 from app.logger import get_logger
 from app.theme import section_header
 
@@ -135,18 +135,29 @@ def _parse_planning_sections(content: str) -> dict:
     }
 
 
-@ui.page("/planning")
-def planning_page() -> None:
-    create_nav("/planning")
+_PLAN_ROUTES: dict[str, tuple[int, str, str]] = {
+    "/plan/strategy": (1, "전략 분석", "AI가 타겟·경쟁·전략 방향을 분석해요."),
+    "/plan/content":  (2, "소식글·제목·쿠폰", "전략을 바탕으로 소식글과 기획 콘텐츠를 만들어요."),
+    "/plan/adset":    (3, "광고 세팅", "캠페인 구조·타겟팅·예산 가이드를 만들어요."),
+    "/plan/proposal": (4, "운영 제안서", "전략·콘텐츠·세팅을 종합한 운영 제안서를 만들어요."),
+}
+
+
+def _render_planning(route: str, initial_step: int) -> None:
+    """Shared body for all /plan/* pages."""
+    step_info = _PLAN_ROUTES[route]
+    title = step_info[1]
+    subtitle = step_info[2]
+
+    create_nav(route)
 
     with ui.column().classes("dg-page-content w-full gap-5"):
+        next_step_bar(route)
 
         # Page header
-        ui.label("광고 기획").classes("dg-page-title")
-        ui.label("AI가 소식글 콘텐츠부터 운영 제안서까지 만들어 드려요.").classes("dg-page-subtitle")
+        ui.label(title).classes("dg-page-title")
+        ui.label(subtitle).classes("dg-page-subtitle")
 
-        # 프로젝트 선택은 사이드바 컨텍스트 스위처(매장→캠페인)로 일원화됨.
-        # 여기서는 current_project_id 기준으로 정보 배너만 표시한다.
         _wizard_reset_ref: dict = {"fn": None}
 
         # -- Project info banner --
@@ -254,6 +265,33 @@ def planning_page() -> None:
             strategy_sel=strategy_sel,
             extra_input=extra_input,
             prompt_editor=prompt_editor,
+            initial_step=initial_step,
         )
         _wizard_reset_ref["fn"] = wizard_reset_fn
+
+
+@ui.page("/planning")
+def planning_page() -> None:
+    """Backward-compat redirect: /planning -> /plan/strategy."""
+    ui.navigate.to("/plan/strategy")
+
+
+@ui.page("/plan/strategy")
+def plan_strategy_page() -> None:
+    _render_planning("/plan/strategy", 1)
+
+
+@ui.page("/plan/content")
+def plan_content_page() -> None:
+    _render_planning("/plan/content", 2)
+
+
+@ui.page("/plan/adset")
+def plan_adset_page() -> None:
+    _render_planning("/plan/adset", 3)
+
+
+@ui.page("/plan/proposal")
+def plan_proposal_page() -> None:
+    _render_planning("/plan/proposal", 4)
 

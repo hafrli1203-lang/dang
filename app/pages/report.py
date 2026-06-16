@@ -6,7 +6,7 @@ from typing import List, Dict
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav
+from app.common import create_nav, next_step_bar
 from app.theme import section_header
 from app.export_manager import ExportManager
 from app.paths import CHARTS_DIR
@@ -22,6 +22,8 @@ from app.ai_engine import build_report_prompt, calc_kpi, SYSTEM_GUIDE_REPORT
 from app.ai.providers import get_provider, ClaudeProvider, OpenAIProvider
 from app.reporting.docx_report import build_report_docx
 from app.reporting.parsers import parse_daangn_csv
+from app.reporting.demographic import parse_demographic_xlsx
+from app.funnel_widget import build_funnel_stages, render_funnel, FULL_METRICS
 from app.chart_preview import make_charts
 
 
@@ -69,6 +71,36 @@ def _parse_excel(content: bytes) -> tuple[List[Dict], str | None]:
             "coupons": _parse_int(row[6] if len(row) > 6 else 0),
         })
     return rows_out, warning
+
+
+def _rows_from_daangn_breakdown(file_bytes: bytes) -> tuple[List[Dict], dict] | None:
+    """당근 광고관리자 직접 내보내기(long-format) xlsx면 날짜별로 롤업해서 rows 반환.
+
+    7열 템플릿(기간|비용|노출|클릭|문의|단골|쿠폰)이면 timeseries가 비므로 None을
+    돌려 _parse_excel 폴백을 타게 한다. 파일에 없는 지표(문의/단골/쿠폰 등)는 0으로
+    두되, metrics_available로 '실제 측정된 지표'를 함께 돌려준다(있는 것만 솔직히).
+    """
+    try:
+        parsed = parse_demographic_xlsx(file_bytes)
+    except Exception:  # noqa: BLE001
+        return None
+    ts = parsed.get("timeseries") or []
+    if not ts:
+        return None
+    rows = [{
+        "period_label": r["date"],
+        "cost": r["cost"],
+        "impressions": r["impressions"],
+        "clicks": r["clicks"],
+        "inquiries": r["inquiries"],
+        "regulars": r["regulars"],
+        "coupons": r["coupons"],
+    } for r in ts]
+    info = {
+        "metrics_available": parsed.get("metrics_available", []),
+        "campaign_names": parsed.get("meta", {}).get("campaign_names", []),
+    }
+    return rows, info
 
 
 def _blank_row(idx: int) -> Dict:
@@ -316,9 +348,11 @@ def report_page() -> None:
     page_state: dict = {
         "rows": [], "kpi": {}, "report_content": "",
         "engine": "claude", "c_text": "", "g_text": "", "cancelled": False,
+        "metrics_available": set(FULL_METRICS),
     }
 
     with ui.column().classes("dg-page-content w-full gap-5"):
+        next_step_bar("/report")  # CSS order로 본문 맨 아래에 '다음 단계' 흐름 버튼
 
         # Page header
         ui.label("성과 보고서").classes("dg-page-title")
@@ -528,84 +562,25 @@ def report_page() -> None:
             funnel_container = ui.element("div").classes("w-full")
 
         def _show_funnel(kpi: dict) -> None:
-            funnel_container.clear()
             t_imp = kpi.get("total_impressions", 0)
             t_click = kpi.get("total_clicks", 0)
             t_inq = kpi.get("total_inquiries", 0)
             t_reg = kpi.get("total_regulars", 0)
             t_coup = kpi.get("total_coupons", 0)
-
             coupon_rate = (t_coup / t_click * 100) if t_click > 0 else 0.0
-            # 단골·쿠폰은 문의를 거치지 않고도 생기므로 '클릭 대비'로 통일
-            stages = [
-                ("노출", t_imp, None, kpi.get("cpm", 0), "1천회당"),
-                ("클릭", t_click, ("노출 대비", kpi.get("ctr", 0)), kpi.get("cpc", 0), "1회당"),
-                ("문의", t_inq, ("클릭 대비", kpi.get("cvr_click_inquiry", 0)), kpi.get("cpa", 0), "1건당"),
-                ("단골", t_reg, ("클릭 대비", kpi.get("cvr_click_regular", 0)), kpi.get("cpr", 0), "1명당"),
-                ("쿠폰", t_coup, ("클릭 대비", coupon_rate), kpi.get("cp_coupon", 0), "1건당"),
-            ]
-            stage_colors = ["#FBEDE0", "#F6D9BE", "#F0C19A", "#E9A977", "#E08F55"]
-            shape_sizes = [100, 82, 64, 46, 28]  # 시각적 폭 (실제 값 비율이 아닌 단계 표현)
-
-            funnel_data = []
-            for i, (label, count, rate_info, cost_per, cost_label) in enumerate(stages):
-                lines = [f"{label}  {count:,}"]
-                if rate_info is not None:
-                    rate_name, rate = rate_info
-                    lines.append(f"{rate_name} {rate:.1f}%")
-                if cost_per > 0:
-                    lines.append(f"{cost_label} ₩{cost_per:,.0f}")
-                funnel_data.append({
-                    "value": shape_sizes[i],
-                    "name": "\n".join(lines),
-                    "itemStyle": {"color": stage_colors[i]},
-                })
-
-            funnel_options = {
-                "series": [{
-                    "type": "funnel",
-                    "sort": "none",
-                    "gap": 6,
-                    "left": "8%",
-                    "width": "84%",
-                    "top": 8,
-                    "bottom": 8,
-                    "minSize": "24%",
-                    "maxSize": "100%",
-                    "label": {
-                        "show": True, "position": "inside",
-                        "fontSize": 13, "lineHeight": 19,
-                        "fontWeight": 600, "color": "#212124",
-                    },
-                    "labelLine": {"show": False},
-                    "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 2},
-                    "data": funnel_data,
-                }],
-            }
-
-            with funnel_container:
-                ui.echart(funnel_options).classes("w-full").style("height: 380px")
-
-                # 이탈 구간 분석
-                drop_rates = []
-                if t_imp > 0 and t_click > 0:
-                    drop_rates.append(("노출->클릭", (1 - t_click / t_imp) * 100))
-                if t_click > 0 and t_inq > 0:
-                    drop_rates.append(("클릭->문의", (1 - t_inq / t_click) * 100))
-                if t_inq > 0 and t_reg > 0:
-                    drop_rates.append(("문의->단골", (1 - t_reg / t_inq) * 100))
-                if t_reg > 0 and t_coup > 0:
-                    drop_rates.append(("단골->쿠폰", (1 - t_coup / t_reg) * 100))
-
-                if drop_rates:
-                    worst = max(drop_rates, key=lambda x: x[1])
-                    with ui.element("div").classes("dg-banner dg-banner-warning w-full mt-3"):
-                        ui.icon("warning", size="18px")
-                        ui.label(
-                            f"최대 이탈 구간: {worst[0]} ({worst[1]:.1f}% 이탈) "
-                            f"- 이 구간의 전환율을 개선하면 효과가 가장 커요."
-                        )
-
+            # 측정된 지표만 단계로 (당근 breakdown에 전환 컬럼이 없으면 노출→클릭까지만).
+            available = page_state.get("metrics_available") or FULL_METRICS
+            stages, has_conv = build_funnel_stages(
+                impressions=t_imp, clicks=t_click,
+                ctr=kpi.get("ctr", 0), cpc=kpi.get("cpc", 0), cpm=kpi.get("cpm", 0),
+                conversions={
+                    "inquiries": (t_inq, kpi.get("cvr_click_inquiry", 0), kpi.get("cpa", 0)),
+                    "regulars": (t_reg, kpi.get("cvr_click_regular", 0), kpi.get("cpr", 0)),
+                    "coupons": (t_coup, coupon_rate, kpi.get("cp_coupon", 0)),
+                },
+                available=available,
+            )
+            render_funnel(funnel_container, stages, has_conversion_data=has_conv)
             funnel_card.classes(remove="hidden")
 
         # -- Trend charts (기간별 추이) — 전체 폭 --
@@ -940,7 +915,7 @@ def report_page() -> None:
             page_state["kpi"] = kpi
             _show_kpi(kpi)
             await _render_charts(rows)
-            pid = project_sel.value
+            pid = nicegui_app.storage.user.get("current_project_id")
             if pid:
                 nicegui_app.storage.user["current_project_id"] = pid
                 save_performance_rows(pid, rows)
@@ -978,6 +953,7 @@ def report_page() -> None:
                 loop = asyncio.get_running_loop()
 
                 if ext == ".csv":
+                    page_state["metrics_available"] = set(FULL_METRICS)
                     csv_rows, warnings = await loop.run_in_executor(
                         None, parse_daangn_csv, file_bytes,
                     )
@@ -1007,18 +983,52 @@ def report_page() -> None:
                         ui.notify("CSV에서 분석할 데이터를 찾지 못했어요. 파일 양식을 확인해 주세요.", type="warning")
                         return
                 elif ext == ".xlsx":
-                    rows, warning = await loop.run_in_executor(
-                        None, _parse_excel, file_bytes,
+                    # 1순위: 당근 광고관리자 직접 내보내기(long-format) 자동 인식 → 일자별 롤업
+                    breakdown = await loop.run_in_executor(
+                        None, _rows_from_daangn_breakdown, file_bytes,
                     )
-                    with upload_summary:
-                        with ui.element("div").classes("dg-banner dg-banner-success w-full"):
-                            ui.icon("check_circle", size="18px")
-                            with ui.column().classes("gap-0"):
-                                ui.label(f"XLSX 파싱 결과: {len(rows)}행 로드됨")
-                                if warning:
-                                    ui.label(f"경고: {warning}").style("font-size: 12px; opacity: 0.8")
-                    if warning:
-                        ui.notify(f"경고: {warning}", type="warning", timeout=8000)
+                    if breakdown is not None:
+                        rows, info = breakdown
+                        warning = None
+                        avail = set(info.get("metrics_available", []))
+                        page_state["metrics_available"] = avail
+                        missing = [
+                            name for key, name in (
+                                ("inquiries", "문의"), ("regulars", "단골"), ("coupons", "쿠폰"),
+                            ) if key not in avail
+                        ]
+                        with upload_summary:
+                            with ui.element("div").classes("dg-banner dg-banner-success w-full"):
+                                ui.icon("check_circle", size="18px")
+                                with ui.column().classes("gap-0"):
+                                    ui.label(
+                                        f"당근 광고관리자 양식 인식 — {len(rows)}일치를 날짜별로 집계했어요."
+                                    )
+                                    camps = info.get("campaign_names", [])
+                                    if camps:
+                                        ui.label(f"캠페인 {len(camps)}개 합산").style(
+                                            "font-size: 12px; opacity: 0.8")
+                                    if missing:
+                                        ui.label(
+                                            f"이 파일엔 {'·'.join(missing)} 전환 데이터가 없어요 — "
+                                            f"노출·클릭·비용 중심으로 보여 드려요. "
+                                            f"당근 내보내기에서 해당 항목을 추가하면 더 깊게 분석돼요."
+                                        ).style("font-size: 12px; opacity: 0.8")
+                    else:
+                        # 2순위: 기간|비용|노출|클릭|문의|단골|쿠폰 7열 템플릿
+                        page_state["metrics_available"] = set(FULL_METRICS)
+                        rows, warning = await loop.run_in_executor(
+                            None, _parse_excel, file_bytes,
+                        )
+                        with upload_summary:
+                            with ui.element("div").classes("dg-banner dg-banner-success w-full"):
+                                ui.icon("check_circle", size="18px")
+                                with ui.column().classes("gap-0"):
+                                    ui.label(f"XLSX 파싱 결과: {len(rows)}행 로드됨")
+                                    if warning:
+                                        ui.label(f"경고: {warning}").style("font-size: 12px; opacity: 0.8")
+                        if warning:
+                            ui.notify(f"경고: {warning}", type="warning", timeout=8000)
                     if not rows:
                         ui.notify("파일에서 데이터를 찾지 못했어요. 양식을 확인해 주세요.", type="warning")
                         return
@@ -1050,6 +1060,7 @@ def report_page() -> None:
             if not rows:
                 ui.notify("분석할 데이터가 아직 없어요. 행을 입력하거나 파일을 올려 주세요.", type="warning")
                 return
+            page_state["metrics_available"] = set(FULL_METRICS)
             await _set_rows(rows)
 
         async def _render_charts(rows: List[Dict]) -> None:
@@ -1073,6 +1084,7 @@ def report_page() -> None:
             page_state["rows"] = []
             page_state["kpi"] = {}
             page_state["report_content"] = ""
+            page_state["metrics_available"] = set(FULL_METRICS)
             page_state["c_text"] = ""
             page_state["g_text"] = ""
             page_state["engine"] = "claude"
@@ -1110,7 +1122,7 @@ def report_page() -> None:
                 report_card.classes(remove="hidden")
 
         async def _generate_report() -> None:
-            pid = project_sel.value
+            pid = nicegui_app.storage.user.get("current_project_id")
             if not pid:
                 ui.notify("프로젝트를 먼저 선택해 주세요.", type="warning")
                 return
@@ -1242,7 +1254,7 @@ def report_page() -> None:
                 raise ValueError("보고서를 먼저 만들어 주세요.")
             rows = page_state.get("rows", [])
             kpi = page_state.get("kpi", {})
-            pid = project_sel.value
+            pid = nicegui_app.storage.user.get("current_project_id")
             project = get_project(pid) if pid else None
             if not project:
                 raise ValueError("프로젝트를 선택해 주세요.")

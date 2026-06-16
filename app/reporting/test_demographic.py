@@ -410,3 +410,74 @@ def test_breakdown_pairing_detects_orphan_manual() -> None:
     gaps = check_auto_manual_pairing(parsed["campaigns"])
     assert len(gaps) == 1
     assert gaps[0].missing_counterpart == "auto"
+
+
+# ─────── long-format WITHOUT 연령 / WITHOUT action columns (실측 밀양 양식) ───────
+
+
+def _build_breakdown_no_age_xlsx() -> bytes:
+    """Mimics 지니스안경 밀양점 export: 캠페인별 일자 추이, 연령·행동 컬럼 없음."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "밀양"
+    ws.append([
+        "기간", "캠페인 이름", "캠페인 ID",
+        "비용 (VAT 포함)", "노출 수", "도달 수", "클릭 수",
+        "클릭률", "클릭당 비용(CPC)", "노출당 비용(CPM)",
+    ])
+    rows = [
+        ("2026.06.01.", "밀양_수동_35~59", 1, 8019, 2545, 1645, 25, 0.98, 320, 3150),
+        ("2026.06.01.", "밀양_수동_35~44", 2, 2552, 1049, 656, 8, 0.76, 319, 2432),
+        ("2026.06.02.", "밀양_수동_35~59", 1, 8972, 2998, 2025, 28, 0.93, 320, 2992),
+        ("2026.06.02.", "밀양_수동_35~44", 2, 2965, 1396, 961, 6, 0.43, 494, 2123),
+    ]
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_breakdown_no_age_aggregates_campaigns_by_name() -> None:
+    """연령 컬럼이 없어도 같은 캠페인 이름은 일자별로 합산되어야 한다(중복 금지)."""
+    parsed = parse_demographic_xlsx(_build_breakdown_no_age_xlsx())
+
+    camps = {c.name: c for c in parsed["campaigns"]}
+    assert set(camps) == {"밀양_수동_35~59", "밀양_수동_35~44"}  # 4 rows → 2 campaigns
+    assert parsed["ages"] == []  # 연령 없음 → 빈 리스트(가짜 생성 금지)
+
+    big = camps["밀양_수동_35~59"]
+    assert big.bid_mode == "manual"  # _수동 접미사에서 파싱
+    assert big.cost == 8019 + 8972
+    assert big.impressions == 2545 + 2998
+    assert big.clicks == 25 + 28
+    assert big.actions == 0  # 행동 컬럼 없음 → 0 (있는 것만)
+
+
+def test_breakdown_no_age_metrics_available_is_honest() -> None:
+    """파일에 실제로 있는 지표만 available로 보고해야 한다."""
+    parsed = parse_demographic_xlsx(_build_breakdown_no_age_xlsx())
+    available = set(parsed["metrics_available"])
+    assert available == {"impressions", "clicks"}
+    for absent in ("inquiries", "regulars", "coupons", "actions"):
+        assert absent not in available
+    assert parsed["meta"]["period_first"] == "2026.06.01"
+    assert parsed["meta"]["period_last"] == "2026.06.02"
+
+
+def test_breakdown_no_age_timeseries_rolls_up_by_date() -> None:
+    parsed = parse_demographic_xlsx(_build_breakdown_no_age_xlsx())
+    ts = {row["date"]: row for row in parsed["timeseries"]}
+    assert set(ts) == {"2026.06.01", "2026.06.02"}
+    assert ts["2026.06.01"]["cost"] == 8019 + 2552
+    assert ts["2026.06.01"]["impressions"] == 2545 + 1049
+    assert ts["2026.06.01"]["clicks"] == 25 + 8
+    assert ts["2026.06.01"]["actions"] == 0
+
+
+def test_breakdown_with_actions_reports_available_metrics() -> None:
+    """행동 컬럼이 있는 양식은 inquiries/regulars/coupons/actions를 available로 보고."""
+    parsed = parse_demographic_xlsx(_build_breakdown_xlsx())
+    available = set(parsed["metrics_available"])
+    assert {"impressions", "clicks", "inquiries", "regulars", "coupons", "actions"} <= available
+    assert len(parsed["timeseries"]) == 2  # D1, D2

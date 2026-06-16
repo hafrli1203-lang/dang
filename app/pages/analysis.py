@@ -17,7 +17,7 @@ from typing import Any
 
 from nicegui import ui, app as nicegui_app
 
-from app.common import create_nav
+from app.common import create_nav, next_step_bar
 from app.database import get_project, get_projects
 from app.export_manager import ExportManager
 from app.paths import CHARTS_DIR, EXPORTS_DIR
@@ -48,6 +48,7 @@ from app.ai_engine import (
 )
 from app.ai.providers import get_provider, OpenAIProvider
 from app.ai.output_validator import repair_output, get_schema
+from app.funnel_widget import build_funnel_stages, render_funnel
 from app.theme import section_header
 
 _log = logging.getLogger("analysis")
@@ -255,6 +256,7 @@ def analysis_page() -> None:
     }
 
     with ui.column().classes("dg-page-content w-full gap-5"):
+        next_step_bar("/analysis")  # CSS order로 본문 맨 아래에 '다음 단계' 흐름 버튼
 
         # Page title
         ui.label("고급 분석").classes("dg-page-title")
@@ -536,6 +538,28 @@ def analysis_page() -> None:
                 state["funnel"] = funnel
                 state["economics"] = economics
 
+                # 보유 지표 + 전환 단계별 합계 (있는 것만 솔직히 표시용)
+                ts = (parsed or {}).get("timeseries", []) or []
+                available = set((parsed or {}).get("metrics_available", []))
+                if not available:  # 레거시 사전집계 양식: funnel 값으로 보유 지표 추정
+                    if funnel.impressions:
+                        available.add("impressions")
+                    if funnel.clicks:
+                        available.add("clicks")
+                    if funnel.actions:
+                        available.add("actions")
+                totals = {
+                    "cost": total_cost,
+                    "impressions": funnel.impressions,
+                    "clicks": funnel.clicks,
+                    "inquiries": sum(int(r.get("inquiries", 0)) for r in ts),
+                    "regulars": sum(int(r.get("regulars", 0)) for r in ts),
+                    "coupons": sum(int(r.get("coupons", 0)) for r in ts),
+                    "actions": funnel.actions,
+                }
+                state["totals"] = totals
+                state["metrics_available"] = available
+
                 pid = project_sel.value
                 project = get_project(pid) if pid else {}
                 project = project or {"name": "광고주", "campaign_name": state.get("filename", "")}
@@ -553,6 +577,7 @@ def analysis_page() -> None:
                     newspost_title=newspost_title,
                     newspost_text=newspost_text,
                     has_thumbnail=has_thumbnail,
+                    metrics_available=available,
                 )
                 thumb_bytes = state.get("thumbnail_data")
                 thumb_mime = state.get("thumbnail_mime", "image/png")
@@ -615,6 +640,7 @@ def analysis_page() -> None:
                     sections=sections, funnel=funnel, economics=economics,
                     age_gender=(parsed or {}).get("age_gender_cells"),
                     pair_comparisons=pair_comparisons,
+                    totals=totals, available=available,
                 )
                 results_card.classes(remove="hidden")
                 ui.notify("분석이 끝났어요. 결과를 확인하고 보고서를 내려받아 보세요.", type="positive")
@@ -748,7 +774,9 @@ def analysis_page() -> None:
         def _render_results(*, ages, campaigns, judgments, plan, priority,
                             var_warnings, pair_gaps, sections,
                             funnel=None, economics=None, age_gender=None,
-                            pair_comparisons=None) -> None:
+                            pair_comparisons=None, totals=None, available=None) -> None:
+            totals = totals or {}
+            available = available if available is not None else set()
             results_body.clear()
             with results_body:
 
@@ -767,11 +795,11 @@ def analysis_page() -> None:
 
                 # ── 현황 진단 ──
                 ui.label("현황 진단").classes("dg-section-title").style("margin-top:16px")
-                _render_status_grid(ages, campaigns, plan)
+                _render_status_grid(ages, campaigns, plan, totals, available)
 
                 # 퍼널 + 경제성
                 if funnel is not None and funnel.impressions > 0:
-                    _render_funnel_card(funnel)
+                    _render_funnel_card(funnel, totals, available)
                 if economics is not None and economics.avg_order_value > 0:
                     _render_economics_card(economics)
 
@@ -781,7 +809,7 @@ def analysis_page() -> None:
 
                 # ── 개선점 ──
                 ui.label("개선점").classes("dg-section-title").style("margin-top:16px")
-                _render_action_cards(judgments, var_warnings, pair_gaps)
+                _render_action_cards(judgments, var_warnings, pair_gaps, available)
                 if sections.get("findings"):
                     with ui.card().classes("w-full"):
                         ui.markdown(sections["findings"]).classes("dg-prose")
@@ -898,52 +926,39 @@ def analysis_page() -> None:
                             ],
                         ).classes("w-full dg-table").props("dense flat bordered")
 
-        def _render_funnel_card(funnel) -> None:
-            stages = [
-                ("노출", funnel.impressions, 100.0, "#7295C4"),
-                ("클릭", funnel.clicks, funnel.ctr, "#E08F55"),
-                ("행동", funnel.actions, funnel.cvr, "#6FAE8F"),
-            ]
+        def _render_funnel_card(funnel, totals, available) -> None:
+            """성과보고서와 동일한 공용 퍼널(ECharts 사다리꼴). 측정된 전환 단계만
+            그리고, 없으면 노출→클릭까지만 + 솔직한 안내(있는 것만)."""
+            cost = int(totals.get("cost", 0))
+            imp, clk = funnel.impressions, funnel.clicks
+            cpc = (cost / clk) if clk else 0.0
+            cpm = (cost / imp * 1000) if imp else 0.0
+
+            def _rate(n: int) -> float:
+                return (n / clk * 100) if clk else 0.0
+
+            def _cp(n: int) -> float:
+                return (cost / n) if n else 0.0
+
+            inq = int(totals.get("inquiries", 0))
+            reg = int(totals.get("regulars", 0))
+            cou = int(totals.get("coupons", 0))
+            stages, has_conv = build_funnel_stages(
+                impressions=imp, clicks=clk, ctr=funnel.ctr, cpc=cpc, cpm=cpm,
+                conversions={
+                    "inquiries": (inq, _rate(inq), _cp(inq)),
+                    "regulars": (reg, _rate(reg), _cp(reg)),
+                    "coupons": (cou, _rate(cou), _cp(cou)),
+                },
+                available=available,
+                action_fallback=(funnel.actions, _rate(funnel.actions), _cp(funnel.actions)),
+            )
             with ui.card().classes("w-full"):
                 ui.label("퍼널 단계별 전환").style(
                     "font-size:14px; font-weight:600; color: var(--dg-text-primary)"
                 )
-                with ui.row().classes("w-full items-stretch gap-2 mt-2"):
-                    for i, (label, count, rate, color) in enumerate(stages):
-                        if i > 0:
-                            ui.label("→").style(
-                                "font-size:20px; align-self:center; color: var(--dg-text-tertiary)"
-                            )
-                        with ui.element("div").style(
-                            f"flex:1; padding:10px; border-radius:8px; "
-                            f"background:{color}11; border:1px solid {color}55; "
-                            f"text-align:center"
-                        ):
-                            ui.label(f"{count:,}").style(
-                                f"font-size:20px; font-weight:700; color:{color}"
-                            )
-                            if i == 0:
-                                ui.label("100%").style(
-                                    f"font-size:11px; color:{color}; font-weight:600"
-                                )
-                            else:
-                                ui.label(f"{rate:.2f}%").style(
-                                    f"font-size:11px; color:{color}; font-weight:600"
-                                )
-                            ui.label(label).style(
-                                "font-size:12px; color: var(--dg-text-secondary); margin-top:2px"
-                            )
-
-                if funnel.bottleneck:
-                    drop = (funnel.drop_impression_to_click
-                            if funnel.bottleneck == "노출→클릭"
-                            else funnel.drop_click_to_action)
-                    with ui.element("div").classes("dg-banner dg-banner-warning w-full mt-2"):
-                        ui.icon("warning", size="16px")
-                        ui.label(
-                            f"최대 이탈 구간: {funnel.bottleneck} ({drop:.1f}% 이탈) — "
-                            f"이 구간 개선이 가장 큰 효과를 냅니다."
-                        )
+                cont = ui.element("div").classes("w-full mt-2")
+                render_funnel(cont, stages, has_conversion_data=has_conv)
 
         def _render_economics_card(economics) -> None:
             status_color = {
@@ -990,20 +1005,38 @@ def analysis_page() -> None:
                     f"광고 후 이익 {economics.expected_profit:,}원"
                 ).style("font-size:12px; color: var(--dg-text-secondary); margin-top:6px")
 
-        def _render_status_grid(ages, campaigns, plan) -> None:
-            total_cost = sum(a.cost for a in ages) or sum(c.cost for c in campaigns)
-            total_actions = sum(a.actions for a in ages) or sum(c.actions for c in campaigns)
+        def _render_status_grid(ages, campaigns, plan, totals=None, available=None) -> None:
+            totals = totals or {}
+            available = available if available is not None else set()
+            total_cost = totals.get("cost") or sum(a.cost for a in ages) or sum(c.cost for c in campaigns)
+            total_impr = totals.get("impressions") or sum(a.impressions for a in ages) or sum(c.impressions for c in campaigns)
+            total_clicks = totals.get("clicks") or sum(a.clicks for a in ages) or sum(c.clicks for c in campaigns)
+            total_actions = totals.get("actions") or sum(a.actions for a in ages) or sum(c.actions for c in campaigns)
             avg_cpa = total_cost / total_actions if total_actions else 0
+            ctr = (total_clicks / total_impr * 100) if total_impr else 0
+            cpc = (total_cost / total_clicks) if total_clicks else 0
+            cpm = (total_cost / total_impr * 1000) if total_impr else 0
             active_ages = [a for a in ages if a.actions > 0]
             best = min(active_ages, key=lambda a: a.cpa) if active_ages else None
             worst = max(active_ages, key=lambda a: a.cpa) if active_ages else None
 
+            # 노출·클릭·비용은 어떤 양식에서도 측정되므로 항상 표시.
             kpis = [
-                ("총 비용", _fmt_won(total_cost), False),
-                ("총 행동", f"{total_actions:,}건", False),
-                ("평균 CPA", _fmt_won(avg_cpa) if total_actions else "-", True),
-                ("캠페인 수", f"{len(campaigns)}개", False),
+                ("총 광고비", _fmt_won(total_cost), False),
+                ("노출", f"{total_impr:,}", False),
+                ("클릭", f"{total_clicks:,}", False),
+                ("CTR", f"{ctr:.2f}%", True),
+                ("CPC", _fmt_won(cpc) if total_clicks else "-", False),
+                ("CPM", _fmt_won(cpm) if total_impr else "-", False),
             ]
+            # 전환·CPA는 데이터가 있을 때만(없으면 '데이터 없음'으로 솔직히).
+            has_actions = ("actions" in available) or total_actions > 0
+            if has_actions:
+                kpis.append(("총 행동", f"{total_actions:,}건", False))
+                kpis.append(("평균 CPA", _fmt_won(avg_cpa) if total_actions else "-", True))
+            else:
+                kpis.append(("전환(문의·단골·쿠폰)", "데이터 없음", False))
+            kpis.append(("캠페인 수", f"{len(campaigns)}개", False))
             if best:
                 kpis.append(("최고 효율 연령", f"{best.label} ({_fmt_won(best.cpa)})", True))
             if worst and worst.label != (best.label if best else ""):
@@ -1038,7 +1071,11 @@ def analysis_page() -> None:
                     ).classes("dg-btn-secondary dg-btn-sm")
                     ui.label("우선순위 1부터 순서대로 처리하면 돼요.").classes("dg-label-sm")
 
-        def _render_action_cards(judgments, var_warnings, pair_gaps) -> None:
+        def _render_action_cards(judgments, var_warnings, pair_gaps, available=None) -> None:
+            available = available if available is not None else set()
+            has_conversion_data = any(
+                k in available for k in ("inquiries", "regulars", "coupons", "actions")
+            )
             actionable = [j for j in judgments
                           if j.verdict in ("캠페인OFF", "소재전면교체", "증액")]
             if not actionable:
@@ -1052,11 +1089,36 @@ def analysis_page() -> None:
                     ).style("font-weight:600; font-size:13px")
                 return
 
+            # 전환이 측정되지 않은 파일이면, '행동 0 = 중단' 식 표현 대신 측정 공백을
+            # 한 번 솔직히 알린다(측정값 없음 ≠ 성과 0).
+            if not has_conversion_data:
+                with ui.element("div").classes("dg-banner dg-banner-info w-full mb-2"):
+                    ui.icon("info", size="18px")
+                    ui.label(
+                        "이 파일엔 전환(문의·단골·쿠폰) 데이터가 없어 클릭 이후 효율은 "
+                        "판정할 수 없어요. 아래 ‘중단’ 권고는 ‘성과가 0이라서’가 아니라 "
+                        "‘측정 공백 상태로 비용을 더 태우지 않기 위해’입니다 — 일시 정지 후 "
+                        "전환 측정을 켜고 재투입하세요."
+                    )
+
+            def _honest_reason(j) -> str:
+                if not has_conversion_data and j.campaign.actions == 0:
+                    return (
+                        f"전환 측정 없음 — 노출·클릭(클릭 {j.campaign.clicks:,}회, "
+                        f"CTR {j.campaign.ctr:.2f}%)은 발생했지만 문의·단골·쿠폰이 이 "
+                        f"파일에 없어 효율 판정 불가. 비용 {_fmt_won(j.campaign.cost)} 집행. "
+                        f"권장: 일시 정지 후 전환 측정을 켜고 재투입."
+                    )
+                return j.reason
+
             with ui.element("div").style(
                 "display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:12px"
             ):
                 for j in actionable:
                     color, label = _VERDICT_BADGE.get(j.verdict, ("info", j.verdict))
+                    # 전환 미측정 시 'OFF'는 '일시정지(측정 보완)'로 라벨도 톤 다운.
+                    if not has_conversion_data and j.verdict == "캠페인OFF":
+                        label = "일시정지"
                     with ui.card().classes("w-full").style(
                         f"border-left:5px solid var(--dg-{color})"
                     ):
@@ -1067,7 +1129,7 @@ def analysis_page() -> None:
                         ui.label(j.campaign.name).style(
                             "font-size:14px; font-weight:600; margin-top:2px"
                         )
-                        ui.label(j.reason).style(
+                        ui.label(_honest_reason(j)).style(
                             "font-size:12px; color: var(--dg-text-secondary); line-height:1.5; margin-top:4px"
                         )
 
@@ -1176,6 +1238,7 @@ def analysis_page() -> None:
                             chart_dir=CHARTS_DIR,
                             funnel=funnel,
                             economics=economics,
+                            metrics_available=state.get("metrics_available"),
                         ),
                     )
                     data = out.read_bytes()

@@ -1413,10 +1413,11 @@ _STRATEGY_PROMPT = """\
 """
 
 
-def build_strategy_prompt(project: dict) -> Tuple[str, str]:
+def build_strategy_prompt(project: dict, current_ad: str = "") -> Tuple[str, str]:
     """Build (system_prompt, user_prompt) for strategy analysis (Step 1).
 
     Returns a tuple so callers can pass system/user separately to the AI provider.
+    current_ad: 현재 운영 중인 광고. 주어지면 그것을 점검·참고해 전략에 반영한다.
     """
     ref_line = (
         f"- 참고 자료: {project.get('reference_url', '')}"
@@ -1433,6 +1434,7 @@ def build_strategy_prompt(project: dict) -> Tuple[str, str]:
         benefits=project.get("benefits", ""),
         ref_line=ref_line,
     )
+    prompt += _current_ad_directive(current_ad)
     return SYSTEM_GUIDE_STRATEGY, prompt
 
 
@@ -1479,6 +1481,26 @@ def _get_planning_guide(engine: str = "") -> str:
     return SYSTEM_GUIDE_PLANNING
 
 
+def _current_ad_directive(current_ad: str) -> str:
+    """현재 운영 광고가 주어지면 '점검 + 개선안 반영' 지시 블록을 만든다.
+
+    백지 생성이 아니라, 지금 돌리는 광고를 출발점으로 약점을 점검하고 그 점검을
+    반영해 더 나은 결과를 만들도록 유도한다. 결과 맨 앞에 점검 요약 섹션을 강제.
+    """
+    if not current_ad or not current_ad.strip():
+        return ""
+    return (
+        "\n\n[현재 운영 중인 광고 — 먼저 점검하고 개선안을 반영하라]\n"
+        f"{current_ad.strip()}\n\n"
+        "위는 광고주가 '지금 실제로 돌리고 있는' 광고입니다. 백지에서 새로 쓰지 말고:\n"
+        "1) 당근 광고 관점에서 약점을 점검하세요 — 제목의 후크, 소식글의 첫 문장·CTA·"
+        "신뢰요소, 쿠폰 혜택의 매력도/구체성, 타겟 적합성 중 무엇이 약한지.\n"
+        "2) 그 점검을 반영해 '개선된' 결과를 만드세요(현재 것의 장점은 살리고 약점만 교체).\n"
+        "3) 결과 맨 앞에 '## 0. 현재 광고 점검' 섹션을 넣어, 무엇이 약했고 어떻게 고쳤는지 "
+        "3~5줄로 짚으세요(막연한 칭찬 금지, 구체적 근거)."
+    )
+
+
 def build_planning_prompt(
     project: dict,
     extra: str = "",
@@ -1486,12 +1508,15 @@ def build_planning_prompt(
     strategy: str = "",
     engine: str = "",
     strategy_context: str = "",
+    current_ad: str = "",
 ) -> Tuple[str, str]:
     """Build (system_prompt, user_prompt) for the selected category.
 
     Returns a tuple so callers can pass system/user separately to the AI provider.
     engine: 'claude' | 'gemini' | '' — selects engine-specific system guide for default category.
     strategy_context: optional strategy analysis from Step 1 to append to prompt.
+    current_ad: 현재 운영 중인 광고(제목·소식글·쿠폰 등). 주어지면 AI가 먼저
+        점검하고 그 점검을 반영한 개선안을 만들도록 프롬프트에 주입한다.
     """
     ref_line = (
         f"- 참고 자료: {project.get('reference_url', '')}"
@@ -1516,6 +1541,7 @@ def build_planning_prompt(
             prompt += f"\n\n[추가 요청 사항]\n{extra.strip()}"
         if strategy_context:
             prompt += f"\n\n[전략 분석 결과]\n{strategy_context}"
+        prompt += _current_ad_directive(current_ad)
         prompt += f"\n\n{format_forced_template(project, extra)}"
         return _get_planning_guide(engine), prompt
 
@@ -1964,11 +1990,13 @@ def build_ad_settings_prompt(
     strategy_context: str = "",
     content_context: str = "",
     budget_plan_context: str = "",
+    current_ad: str = "",
 ) -> Tuple[str, str]:
     """Build (system_prompt, user_prompt) for ad settings guide (Step 3).
 
     budget_plan_context: 룰 엔진(budget_planner)이 계산한 캠페인 세팅표.
     제공되면 AI는 캠페인 구조를 임의 설계하지 않고 이 설계를 따른다.
+    current_ad: 현재 운영 중인 광고(세팅 포함). 주어지면 점검·개선안을 반영한다.
 
     Returns a tuple so callers can pass system/user separately to the AI provider.
     """
@@ -1984,6 +2012,7 @@ def build_ad_settings_prompt(
         content_context=content_context or "(없음)",
         budget_plan=budget_plan_context or "(없음 — Step 1 캠페인 그룹 기반으로 직접 설계)",
     )
+    prompt += _current_ad_directive(current_ad)
     return SYSTEM_GUIDE_AD_SETTINGS, prompt
 
 
@@ -2205,6 +2234,24 @@ breakdown 분석 보고서를 작성합니다.
 - 최적화 순서: **콘텐츠(소재/카피) → 캠페인(타게팅/예산) → 타겟(연령/지역) → 예산**
 - 소거(OFF) → 집중(증액) → 스케일업 사이클.
 
+[퍼포먼스 광고 운영 원리 — 검증된 사고법의 당근 적용]
+- **광고 ≠ 마케팅**: 광고는 '비용을 써서 노출시키는 일', 마케팅은 '이익을 남기는 일'입니다.
+  노출·클릭(대시보드 숫자)이 좋아도 뒷단(문의·단골·쿠폰·실제 매장 방문)이 깨져 있으면 전체가
+  무너집니다. 그래서 늘 두 가지를 같이 봅니다 — ① 노출/클릭(광고 데이터) ② 문의/단골/쿠폰(전환·손익 데이터).
+- **싸고 효과 큰 것부터**: 개선 순서는 콘텐츠(썸네일·소식글 제목 후크) → 광고 구조(연령 분리·예산
+  재배분) → 전환단(소식글 본문·혜택·가격). 본문·가격부터 손대지 마세요. 같은 연령·성별이어도
+  '반응하는 사람'은 세계관이 다릅니다 — 그들을 끌어오는 건 타게팅보다 **콘텐츠(메시지)**입니다.
+  썸네일·카피만 바꿔도 성과의 절반 이상이 풀리는 경우가 많습니다.
+- **병목 먼저**: 전환이 안 나오면 본문부터 의심하지 말고, 노출→클릭→문의→단골→쿠폰 중 이탈이
+  가장 큰 한 구간을 찾아 거기만 고칩니다(한 번에 한 변수).
+- **대시보드를 신봉하지 마세요**: 당근 클릭 수가 곧 매장 방문은 아닙니다. 전화 문의·쿠폰 사용·재방문
+  (단골)으로 교차 확인하고, 측정이 안 되는 뒷단(실제 방문·구매)은 전화 문의수·쿠폰 다운로드 같은
+  보조 지표로 가늠합니다. 전환 항목이 꺼져 있으면 **'측정을 켜라'가 1순위 처방**입니다.
+- **소거 후 집중**: 효율 나쁜 캠페인·연령을 끄고(소거), 아낀 예산을 살아남은 효율 좋은 곳에 몰아줍니다
+  (재배분). 끈 것을 어디에 다시 부을지까지 한 세트로 제안합니다.
+- **후평가 루프**: MAX CPA 같은 기준을 세우고 → 실행 → 실제 결과와 대조 → 병목을 찾아 → 다음 회차에
+  반영합니다. "클릭 단가는 쌌는데 문의가 안 늘었다 → 본문·혜택 문제" 식으로 단계별로 원인을 좁힙니다.
+
 [퍼널 병목별 구체 액션 — 막연한 제안 금지]
 * 노출→클릭(CTR) 병목 (CTR 0.5% 미만 또는 평균 이하 -30%):
   - 썸네일: 0원/무료/즉시혜택을 정면에 큰 글씨로. 인물 정면 응시 + 표정.
@@ -2340,6 +2387,7 @@ def build_analysis_prompt(
     newspost_title: str = "",
     newspost_text: str = "",
     has_thumbnail: bool = False,
+    metrics_available=None,
 ) -> str:
     """Build prompt for AI to write a 광고주-friendly demographic analysis report.
 
@@ -2412,16 +2460,41 @@ def build_analysis_prompt(
     var_summary = "(캠페인 비교 분석은 수행하지 않습니다. 각 캠페인을 개별 진단하세요.)"
     pair_summary = "(자동/수동 페어 여부는 운영 의도이므로 액션화하지 않습니다.)"
 
+    # 전환(문의·단골·쿠폰/행동) 데이터가 실제로 수집됐는지 판정.
+    # 없으면 '행동 0'을 '전환 실패/손실'로 오해하지 않도록 AI에 명시한다(있는 것만 솔직히).
+    if metrics_available is not None:
+        _avail = set(metrics_available)
+        has_conversion_data = any(
+            k in _avail for k in ("inquiries", "regulars", "coupons", "actions")
+        )
+    else:
+        has_conversion_data = bool(funnel is not None and funnel.actions > 0)
+
     funnel_block = ""
     if funnel is not None and funnel.impressions > 0:
-        funnel_block = (
-            f"\n\n[퍼널 단계별 전환]\n"
-            f"- 노출 {funnel.impressions:,} → 클릭 {funnel.clicks:,} "
-            f"(CTR {funnel.ctr:.2f}%, 이탈 {funnel.drop_impression_to_click:.1f}%)\n"
-            f"- 클릭 {funnel.clicks:,} → 행동 {funnel.actions:,} "
-            f"(CVR {funnel.cvr:.2f}%, 이탈 {funnel.drop_click_to_action:.1f}%)\n"
-            f"- 병목 구간: {funnel.bottleneck or '판정 불가'}"
-        )
+        if has_conversion_data:
+            funnel_block = (
+                f"\n\n[퍼널 단계별 전환]\n"
+                f"- 노출 {funnel.impressions:,} → 클릭 {funnel.clicks:,} "
+                f"(CTR {funnel.ctr:.2f}%, 이탈 {funnel.drop_impression_to_click:.1f}%)\n"
+                f"- 클릭 {funnel.clicks:,} → 행동 {funnel.actions:,} "
+                f"(CVR {funnel.cvr:.2f}%, 이탈 {funnel.drop_click_to_action:.1f}%)\n"
+                f"- 병목 구간: {funnel.bottleneck or '판정 불가'}"
+            )
+        else:
+            funnel_block = (
+                f"\n\n[퍼널 단계별 전환 — 클릭까지만 측정됨]\n"
+                f"- 노출 {funnel.impressions:,} → 클릭 {funnel.clicks:,} "
+                f"(CTR {funnel.ctr:.2f}%, 이탈 {funnel.drop_impression_to_click:.1f}%)\n"
+                f"- 이 파일에는 클릭 이후 전환(문의·단골·쿠폰) 데이터가 **수집되지 "
+                f"않았습니다**. 따라서 '행동 0'은 성과가 0이라는 뜻이 아니라 측정값이 "
+                f"없다는 뜻입니다.\n"
+                f"- **금지**: '행동 0건', 'CVR 0%', '광고비 100% 손실/낭비', '전환 실패' "
+                f"같은 표현으로 단정하지 마세요. 클릭 이후 단계는 평가하지 말고, CTR·CPC·"
+                f"노출·클릭·비용 효율과 소재(썸네일/카피) 관점으로만 진단하세요.\n"
+                f"- 광고주에게는 '당근 내보내기에서 전환 항목(문의·단골·쿠폰)을 추가하면 "
+                f"클릭 이후까지 분석할 수 있다'고 1줄로 안내하세요."
+            )
 
     economics_block = ""
     if economics is not None and economics.avg_order_value > 0:
@@ -2507,7 +2580,13 @@ def build_analysis_prompt(
         f"2) 막연한 제안('개선하세요','검토하세요','신경 쓰세요') 금지. 반드시 '무엇을 / 어디에 / 어떻게'를 명시합니다.\n"
         f"3) 퍼널 병목 데이터가 있으면 시스템 가이드의 [퍼널 병목별 구체 액션]을 그대로 인용해 액션을 만듭니다.\n"
         f"4) MAX CPA 데이터가 있으면 적자/손익분기/흑자 판정과 그 근거를 한 줄로 명시합니다.\n"
-        f"5) 수치 인용은 위 표에서만 가져오고 추측 금지."
+        f"5) 수치 인용은 위 표에서만 가져오고 추측 금지.\n"
+        f"6) **보고서 문체**: 단어 나열식 불릿 조각이 아니라, '지표 X가 Y이므로(근거) → 결론 Z'가 "
+        f"이어지는 완결된 문장으로 씁니다. 각 진단·액션은 반드시 근거 수치를 문장 안에 함께 적어 "
+        f"광고주가 '왜 그렇게 판단했는지' 바로 납득되게 하세요. (예: '클릭률이 0.77%로 당근 평균 "
+        f"1%에 못 미쳐, 노출 대비 클릭이 새고 있습니다 → 썸네일 후크를 …') 근거 없는 단정 금지.\n"
+        f"7) **데이터 없음 정직**: 측정되지 않은 지표는 '데이터 없음'으로 명시하고, 없는 값을 0이나 "
+        f"실패로 단정하지 마세요. 위 [퍼널 …] 블록의 금지 지시를 그대로 따릅니다."
     )
 
 

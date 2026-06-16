@@ -306,7 +306,7 @@ def _build_campaign_table(doc: Document, judgments: Sequence) -> None:
         row[5].text = j.verdict
 
 
-def _build_funnel_section(doc: Document, funnel) -> None:
+def _build_funnel_section(doc: Document, funnel, has_conversion_data: bool = True) -> None:
     doc.add_heading("퍼널 단계별 전환", level=2)
     table = doc.add_table(rows=1, cols=4)
     table.style = "Light Grid Accent 2"
@@ -317,13 +317,28 @@ def _build_funnel_section(doc: Document, funnel) -> None:
         ("노출", f"{funnel.impressions:,}", "100%", "-"),
         ("클릭", f"{funnel.clicks:,}", f"{funnel.ctr:.2f}% (CTR)",
          f"{funnel.drop_impression_to_click:.1f}%"),
-        ("행동", f"{funnel.actions:,}", f"{funnel.cvr:.2f}% (CVR)",
-         f"{funnel.drop_click_to_action:.1f}%"),
     ]
+    # 전환(문의·단골·쿠폰) 데이터가 실제로 수집된 경우에만 행동 단계를 표기한다.
+    if has_conversion_data:
+        rows.append(
+            ("행동", f"{funnel.actions:,}", f"{funnel.cvr:.2f}% (CVR)",
+             f"{funnel.drop_click_to_action:.1f}%")
+        )
     for r in rows:
         row = table.add_row().cells
         for i, v in enumerate(r):
             row[i].text = v
+
+    if not has_conversion_data:
+        _add_styled_paragraph(
+            doc,
+            "이 파일에는 클릭 이후 전환(문의·단골·쿠폰) 데이터가 수집되지 않아 "
+            "노출·클릭까지만 표기했습니다. ‘행동 0’은 성과가 0이라는 뜻이 아니라 "
+            "측정값이 없다는 의미이며, 당근 내보내기에 전환 항목을 추가하면 클릭 이후 "
+            "단계까지 분석할 수 있습니다.",
+            size=10, bold=False, color=RGBColor(0x4B, 0x55, 0x63),
+        )
+        return
     if funnel.bottleneck:
         drop = (funnel.drop_impression_to_click
                 if funnel.bottleneck == "노출→클릭"
@@ -425,9 +440,17 @@ def build_analysis_docx(
     chart_dir: Path,
     funnel=None,
     economics=None,
+    metrics_available=None,
 ) -> Path:
     """Generate the 광고주 전달용 분석 보고서 DOCX. Returns output_path."""
     doc = Document()
+    if metrics_available is not None:
+        _avail = set(metrics_available)
+        has_conversion_data = any(
+            k in _avail for k in ("inquiries", "regulars", "coupons", "actions")
+        )
+    else:
+        has_conversion_data = bool(funnel is not None and funnel.actions > 0)
 
     _build_cover(doc, project_meta)
 
@@ -443,7 +466,7 @@ def build_analysis_docx(
 
     # Funnel section
     if funnel is not None and funnel.impressions > 0:
-        _build_funnel_section(doc, funnel)
+        _build_funnel_section(doc, funnel, has_conversion_data)
 
     # Economics section
     if economics is not None and economics.avg_order_value > 0:

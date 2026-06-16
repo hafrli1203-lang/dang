@@ -198,6 +198,7 @@ def build_wizard_ui(
     strategy_sel,
     extra_input,
     prompt_editor,
+    initial_step: int = 1,
 ) -> None:
     """Build the 4-step wizard UI inside the news-post tab panel.
 
@@ -207,7 +208,7 @@ def build_wizard_ui(
 
     # -- Wizard state --
     _wizard_state: dict = {
-        "current_step": 1,
+        "current_step": initial_step,
         "step1_content": "",
         "step1_sections": {},
         "step2_content": "",
@@ -219,48 +220,13 @@ def build_wizard_ui(
         "project_id": nicegui_app.storage.user.get("current_project_id"),
     }
 
-    # ── Step indicator ──────────────────────────────────────────────────────
-
-    step_indicator = ui.element("div").classes("dg-wizard-steps w-full")
-
-    step_circles: list = []
-    step_labels_ui: list = []
-
-    def _render_step_indicator() -> None:
-        step_indicator.clear()
-        step_circles.clear()
-        step_labels_ui.clear()
-        current = _wizard_state["current_step"]
-        with step_indicator:
-            for idx in range(4):
-                step_num = idx + 1
-                if step_num < current:
-                    cls = "completed"
-                elif step_num == current:
-                    cls = "active"
-                elif step_num > _MAX_ENABLED_STEP:
-                    cls = "disabled"
-                else:
-                    cls = "pending"
-
-                with ui.element("div").classes(f"dg-wizard-step {cls}"):
-                    if idx < 3:
-                        ui.element("div").classes("dg-wizard-step-line")
-                    circle = ui.element("div").classes("dg-wizard-step-circle")
-                    with circle:
-                        if step_num < current:
-                            ui.icon("check", size="18px")
-                        else:
-                            ui.label(str(step_num))
-                    lbl = ui.label(_STEP_LABELS[idx]).classes("dg-wizard-step-label")
-                    step_circles.append(circle)
-                    step_labels_ui.append(lbl)
-
-                    if step_num <= _MAX_ENABLED_STEP:
-                        circle.on(
-                            "click",
-                            lambda _e, s=step_num: _go_to_step(s),
-                        )
+    # ── Route map for step navigation ─────────────────────────────────────
+    _STEP_ROUTES = {
+        1: "/plan/strategy",
+        2: "/plan/content",
+        3: "/plan/adset",
+        4: "/plan/proposal",
+    }
 
     # ── Content containers ──────────────────────────────────────────────────
 
@@ -271,9 +237,9 @@ def build_wizard_ui(
     def _go_to_step(step: int) -> None:
         if step < 1 or step > _MAX_ENABLED_STEP:
             return
-        _wizard_state["current_step"] = step
-        _render_step_indicator()
-        _render_current_step()
+        route = _STEP_ROUTES.get(step)
+        if route:
+            ui.navigate.to(route)
 
     # ── Unified export bar helper ─────────────────────────────────────────
 
@@ -333,6 +299,82 @@ def build_wizard_ui(
 
     # ── Step 1: Strategy Analysis ───────────────────────────────────────────
 
+    def _collect_current_ad() -> str:
+        """현재 운영 중인 광고 입력값을 점검·반영용 텍스트로 합친다. 비면 ''."""
+        def _val(key: str) -> str:
+            w = _wizard_state.get(key)
+            return (w.value or "").strip() if w else ""
+        titles = _val("_cur_ad_titles")
+        news = _val("_cur_ad_news")
+        coupon = _val("_cur_ad_coupon")
+        setting = _val("_cur_ad_setting")
+        parts: list[str] = []
+        if titles:
+            parts.append(f"현재 제목:\n{titles}")
+        if news:
+            parts.append(f"현재 소식글:\n{news}")
+        if coupon:
+            parts.append(f"현재 쿠폰: {coupon}")
+        if setting:
+            parts.append(f"현재 광고 세팅:\n{setting}")
+        return "\n\n".join(parts)
+
+    def _render_current_ad_card(include_setting: bool = False) -> None:
+        """현재 운영 광고 입력 카드. 위젯을 _wizard_state['_cur_ad_*']에 저장한다.
+
+        include_setting=True면 세팅(반경/성별/연령/입찰/예산) 입력란도 추가하고
+        프로젝트 DB값으로 프리필한다. (Step3 광고세팅용)
+        """
+        _pid = nicegui_app.storage.user.get("current_project_id")
+        _p = get_project(_pid) if _pid else None
+        with ui.expansion(
+            "현재 운영 중인 광고 반영 (선택)", icon="fact_check",
+        ).classes("w-full dg-card-flat"):
+            ui.label(
+                "지금 돌리는 광고를 넣으면, AI가 먼저 점검하고 약점을 고친 개선안을 반영해 드려요. 비워 두면 새로 만들어요."
+            ).classes("dg-hint mb-2")
+            _wizard_state["_cur_ad_news"] = ui.textarea(
+                label="현재 소식글",
+                placeholder="지금 운영 중인 소식글 본문을 붙여넣으세요",
+            ).classes("w-full dg-input").props("rows=4 outlined dense")
+            _wizard_state["_cur_ad_titles"] = ui.textarea(
+                label="현재 제목",
+                placeholder="현재 광고 제목(여러 개면 줄바꿈)",
+                value=(_p or {}).get("ad_titles", "") or "",
+            ).classes("w-full dg-input").props("rows=2 outlined dense")
+            _wizard_state["_cur_ad_coupon"] = ui.input(
+                label="현재 쿠폰",
+                placeholder="예: 변색렌즈 0원 / 6월 30일까지",
+                value=(_p or {}).get("coupon_info", "") or "",
+            ).classes("w-full dg-input").props("outlined dense")
+            if include_setting:
+                _setting_prefill = _format_setting_prefill(_p or {})
+                _wizard_state["_cur_ad_setting"] = ui.textarea(
+                    label="현재 광고 세팅",
+                    placeholder="반경/성별/연령/입찰방식/일예산 등",
+                    value=_setting_prefill,
+                ).classes("w-full dg-input").props("rows=3 outlined dense")
+
+    def _format_setting_prefill(p: dict) -> str:
+        """프로젝트 DB의 타겟 세팅 필드를 사람이 읽는 한 줄로 만든다."""
+        bits: list[str] = []
+        radius = p.get("target_radius_km")
+        if radius:
+            bits.append(f"반경 {radius}km")
+        gender = (p.get("target_gender") or "").strip()
+        if gender:
+            bits.append(f"성별 {gender}")
+        age = (p.get("target_age") or "").strip()
+        if age:
+            bits.append(f"연령 {age}")
+        bid = (p.get("bid_type") or "").strip()
+        if bid:
+            bits.append(f"입찰 {bid}")
+        budget = p.get("daily_budget")
+        if budget:
+            bits.append(f"일예산 {budget}원")
+        return " / ".join(bits)
+
     def _render_step1() -> None:
         content_container.clear()
         with content_container:
@@ -353,6 +395,8 @@ def build_wizard_ui(
                         "타겟 페르소나, 경쟁 환경, 전략 방향, 캠페인 그룹 구성이 담겨요."
                     ).classes("dg-label-sm").style("text-align: center")
 
+                    _render_current_ad_card()
+
                     with ui.row().classes("gap-3 items-center"):
                         gen_strategy_btn = ui.button(
                             "전략 분석 생성", icon="auto_awesome",
@@ -366,6 +410,110 @@ def build_wizard_ui(
                     _wizard_state["_s1_spinner"] = s1_spinner
                     _wizard_state["_s1_status"] = s1_status
 
+    def _render_ai_chat(chat_key: str, context_provider) -> None:
+        """스텝 결과에 대한 멀티턴 추가 질문 패널.
+
+        chat_key: 히스토리 구분 키(예: 'strategy'). _wizard_state['_chat_<key>'].
+        context_provider: () -> str. 현재 스텝 콘텐츠(질문 맥락)를 반환.
+        결과를 다시 쓰지 않고 질문에 필요한 부분만 설명/제안한다.
+        """
+        hist_key = f"_chat_{chat_key}"
+        if hist_key not in _wizard_state:
+            _wizard_state[hist_key] = []  # list[tuple[role, text]]
+
+        with ui.expansion("AI에게 더 물어보기", icon="forum").classes("w-full dg-card-flat"):
+            ui.label(
+                "이 결과에 대해 궁금한 점을 물어보세요. 수정 없이 설명이나 아이디어를 받을 수 있어요."
+            ).classes("dg-hint mb-2")
+            msg_box = ui.column().classes("w-full gap-2")
+
+            def _render_msgs() -> None:
+                msg_box.clear()
+                with msg_box:
+                    for role, text in _wizard_state[hist_key]:
+                        align = "justify-end" if role == "user" else "justify-start"
+                        bubble = "dg-chat-user" if role == "user" else "dg-chat-ai"
+                        with ui.row().classes(f"w-full {align}"):
+                            ui.markdown(text).classes(bubble)
+
+            _render_msgs()
+
+            q_input = ui.textarea(
+                placeholder="예: 20대 여성 타겟은 왜 빠졌나요? / 이 카피를 더 공격적으로 바꾸면?",
+            ).classes("w-full dg-input").props("rows=2 outlined dense")
+            with ui.row().classes("gap-2 items-center"):
+                send_btn = ui.button("질문 보내기", icon="send").classes("dg-btn-primary dg-btn-sm")
+                chat_spinner = ui.spinner(size="22px").classes("hidden")
+
+            async def _send() -> None:
+                q = (q_input.value or "").strip()
+                if not q:
+                    return
+                context = (context_provider() or "").strip()
+                if not context:
+                    ui.notify("먼저 이 단계 결과를 만들어 주세요.", type="warning")
+                    return
+                engine = engine_radio.value if engine_radio.value not in ("both", "coordinate") else "claude"
+                _wizard_state[hist_key].append(("user", q))
+                q_input.value = ""
+                _render_msgs()
+                send_btn.props("disabled")
+                chat_spinner.classes(remove="hidden")
+                try:
+                    history = _wizard_state[hist_key][:-1]
+                    convo = "\n".join(
+                        f"{'사용자' if r == 'user' else 'AI'}: {t}" for r, t in history
+                    )
+                    guide = (
+                        "당신은 당근마켓 광고 전문가입니다. 아래 '기획 결과'를 근거로 사용자의 "
+                        "추가 질문에 한국어 해요체로 친근하게 답하세요. 결과 전체를 다시 쓰지 말고 "
+                        "질문에 필요한 부분만 짚어 설명하거나 구체적인 아이디어를 제안하세요."
+                    )
+                    prompt = (
+                        f"[기획 결과]\n{context}\n\n"
+                        + (f"[이전 대화]\n{convo}\n\n" if convo else "")
+                        + f"[질문]\n{q}"
+                    )
+                    loop = asyncio.get_running_loop()
+                    provider = get_provider(engine)
+                    answer = await loop.run_in_executor(
+                        None, lambda: provider.generate_text(prompt, system_prompt=guide),
+                    )
+                    _wizard_state[hist_key].append(("ai", answer or "(답변을 받지 못했어요)"))
+                    _render_msgs()
+                except Exception as exc:
+                    _log.exception("AI 추가 질문 실패: %s", exc)
+                    ui.notify("답변을 받지 못했어요. 잠시 후 다시 시도해 주세요.", type="negative")
+                finally:
+                    send_btn.props(remove="disabled")
+                    chat_spinner.classes("hidden")
+
+            send_btn.on_click(_send)
+
+    def _extract_checkup(raw: str) -> str:
+        """원문에서 '## 0. 현재 광고 점검' 블록 본문을 뽑는다(헤더 제외). 없으면 ''."""
+        m = re.search(
+            r"##\s*0\.?\s*현재 광고 점검\s*\n(.*?)(?=\n##\s|\Z)", raw or "", re.DOTALL,
+        )
+        if not m:
+            return ""
+        body = re.sub(r"\n*-{3,}\s*$", "", m.group(1).strip()).strip()
+        return body
+
+    def _render_checkup_card(raw: str) -> None:
+        """현재 광고 점검 블록이 있으면 결과 상단에 강조 카드로 띄운다.
+
+        전략·세팅·제안서 결과는 고정 섹션만 렌더하므로 '## 0' 점검이 화면에서
+        누락된다 → 여기서 별도로 surface 한다.
+        """
+        body = _extract_checkup(raw)
+        if not body:
+            return
+        with ui.expansion(
+            "현재 광고 점검 + 개선 방향", icon="fact_check", value=True,
+        ).classes("w-full dg-card-accent"):
+            ui.markdown(body).classes("w-full dg-prose")
+
     def _render_strategy_result() -> None:
         """Render strategy analysis results with edit/regenerate controls."""
         content_container.clear()
@@ -375,6 +523,8 @@ def build_wizard_ui(
             section_header("analytics", "전략 분석 결과")
 
             _render_export_bar(1)
+
+            _render_checkup_card(_wizard_state.get("step1_content", ""))
 
             for key in _STRATEGY_SECTION_KEYS:
                 label = _STRATEGY_SECTION_LABELS[key]
@@ -449,6 +599,8 @@ def build_wizard_ui(
                 _wizard_state["_regen_status"] = regen_status
                 _wizard_state["_regen_btn"] = regen_btn
 
+            _render_ai_chat("strategy", lambda: _wizard_state.get("step1_content", ""))
+
             # Navigation
             _render_export_bar(1)
 
@@ -489,7 +641,7 @@ def build_wizard_ui(
             status.set_text("전략 분석을 만들고 있어요...")
 
         try:
-            guide, prompt = build_strategy_prompt(project)
+            guide, prompt = build_strategy_prompt(project, current_ad=_collect_current_ad())
             loop = asyncio.get_running_loop()
             if engine == "coordinate":
                 from app.ai.coordination import coordinate_generate
@@ -555,7 +707,7 @@ def build_wizard_ui(
             regen_status.set_text("다시 만들고 있어요...")
 
         try:
-            guide, prompt = build_strategy_prompt(project)
+            guide, prompt = build_strategy_prompt(project, current_ad=_collect_current_ad())
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
             if _wizard_state["step1_content"]:
@@ -588,9 +740,7 @@ def build_wizard_ui(
         if not _wizard_state["step1_content"]:
             ui.notify("전략 분석을 먼저 만들어 주세요.", type="warning")
             return
-        _wizard_state["current_step"] = 2
-        _render_step_indicator()
-        _render_current_step()
+        ui.navigate.to("/plan/content")
 
     # ── Step 2: Content Generation ──────────────────────────────────────────
 
@@ -612,6 +762,30 @@ def build_wizard_ui(
                 "engine": _wizard_state.get("step2_engine", "claude"),
                 "cancelled": False,
             }
+
+            # Current ad review card (optional)
+            with ui.expansion(
+                "현재 운영 중인 광고 반영 (선택)", icon="fact_check",
+            ).classes("w-full dg-card-flat"):
+                ui.label(
+                    "지금 돌리는 광고를 넣으면, AI가 점검하고 약점을 고친 개선안을 만들어 드려요. 비워 두면 새로 만들어요."
+                ).classes("dg-hint mb-2")
+                _prefill_pid = nicegui_app.storage.user.get("current_project_id")
+                _prefill_p = get_project(_prefill_pid) if _prefill_pid else None
+                _wizard_state["_cur_ad_news"] = ui.textarea(
+                    label="현재 소식글",
+                    placeholder="지금 운영 중인 소식글 본문을 붙여넣으세요",
+                ).classes("w-full dg-input").props("rows=4 outlined dense")
+                _wizard_state["_cur_ad_titles"] = ui.textarea(
+                    label="현재 제목",
+                    placeholder="현재 광고 제목(여러 개면 줄바꿈)",
+                    value=(_prefill_p or {}).get("ad_titles", "") or "",
+                ).classes("w-full dg-input").props("rows=2 outlined dense")
+                _wizard_state["_cur_ad_coupon"] = ui.input(
+                    label="현재 쿠폰",
+                    placeholder="예: 변색렌즈 0원 / 6월 30일까지",
+                    value=(_prefill_p or {}).get("coupon_info", "") or "",
+                ).classes("w-full dg-input").props("outlined dense")
 
             # Action buttons
             with ui.row().classes("gap-3 items-center"):
@@ -686,7 +860,7 @@ def build_wizard_ui(
                             _eb.classes(remove="hidden")
                             pid = nicegui_app.storage.user.get("current_project_id")
                             if pid:
-                                save_generated_content(pid, "edited", new_text)
+                                save_generated_content(pid, "edited", new_text, content_type="content")
                             _update_result_display(new_text)
                             ui.notify("수정한 내용을 저장했어요.", type="positive")
 
@@ -1070,6 +1244,21 @@ def build_wizard_ui(
                 result_card.classes(remove="hidden")
                 feedback_card_s2.classes(remove="hidden")
 
+            # ── Current ad text builder ──────────────────────────────────────
+
+            def _build_current_ad() -> str:
+                news = (_wizard_state.get("_cur_ad_news").value or "").strip() if _wizard_state.get("_cur_ad_news") else ""
+                titles = (_wizard_state.get("_cur_ad_titles").value or "").strip() if _wizard_state.get("_cur_ad_titles") else ""
+                coupon = (_wizard_state.get("_cur_ad_coupon").value or "").strip() if _wizard_state.get("_cur_ad_coupon") else ""
+                parts: list[str] = []
+                if titles:
+                    parts.append(f"현재 제목:\n{titles}")
+                if news:
+                    parts.append(f"현재 소식글:\n{news}")
+                if coupon:
+                    parts.append(f"현재 쿠폰: {coupon}")
+                return "\n\n".join(parts)
+
             # ── Generate content ─────────────────────────────────────────────
 
             async def _generate_content() -> None:
@@ -1112,10 +1301,12 @@ def build_wizard_ui(
                 try:
                     _set_step("1/3 콘텐츠 작성을 준비하고 있어요...")
                     strategy_ctx = _wizard_state.get("step1_content", "")
+                    cur_ad = _build_current_ad()
                     guide, prompt = build_planning_prompt(
                         project, extra, category=cat, strategy=strat,
                         engine=engine if engine not in ("both", "coordinate") else "",
                         strategy_context=strategy_ctx,
+                        current_ad=cur_ad,
                     )
                     _custom = get_setting("custom_system_prompt")
                     if _custom:
@@ -1132,10 +1323,12 @@ def build_wizard_ui(
                         claude_guide, _ = build_planning_prompt(
                             project, extra, category=cat, strategy=strat, engine="claude",
                             strategy_context=strategy_ctx,
+                            current_ad=cur_ad,
                         )
                         gpt_guide, _ = build_planning_prompt(
                             project, extra, category=cat, strategy=strat, engine="gpt",
                             strategy_context=strategy_ctx,
+                            current_ad=cur_ad,
                         )
                         if _custom:
                             claude_guide = _custom
@@ -1167,7 +1360,7 @@ def build_wizard_ui(
                     _s2["engine"] = engine
                     _wizard_state["step2_content"] = content
                     _wizard_state["step2_engine"] = engine
-                    save_generated_content(pid, engine, content)
+                    save_generated_content(pid, engine, content, content_type="content")
 
                     _update_result_display(content)
                     ui.notify("기획 콘텐츠가 완성됐어요!", type="positive")
@@ -1231,9 +1424,11 @@ def build_wizard_ui(
                     cat = category_sel.value or "default"
                     strat = strategy_sel.value or "A"
                     strategy_ctx = _wizard_state.get("step1_content", "")
+                    cur_ad = _build_current_ad()
                     guide, prompt = build_planning_prompt(
                         project, extra_input.value, category=cat, strategy=strat,
                         engine=engine, strategy_context=strategy_ctx,
+                        current_ad=cur_ad,
                     )
                     _custom = get_setting("custom_system_prompt")
                     if _custom:
@@ -1253,7 +1448,7 @@ def build_wizard_ui(
                     _s2["engine"] = engine
                     _wizard_state["step2_content"] = content
                     _wizard_state["step2_engine"] = engine
-                    save_generated_content(pid, engine, content)
+                    save_generated_content(pid, engine, content, content_type="content")
 
                     _update_result_display(content)
                     ui.notify("콘텐츠를 다시 만들었어요!", type="positive")
@@ -1356,6 +1551,8 @@ def build_wizard_ui(
                     _wizard_state["step2_content"] = saved["content"]
                     _update_result_display(saved["content"])
 
+            _render_ai_chat("content", lambda: _wizard_state.get("step2_content", ""))
+
             # Navigation buttons
             _render_export_bar(
                 2,
@@ -1367,9 +1564,7 @@ def build_wizard_ui(
         if not _wizard_state["step2_content"]:
             ui.notify("콘텐츠를 먼저 만들어 주세요.", type="warning")
             return
-        _wizard_state["current_step"] = 3
-        _render_step_indicator()
-        _render_current_step()
+        ui.navigate.to("/plan/adset")
 
     # ── Step 3: Ad Settings Guide ────────────────────────────────────────────
 
@@ -1395,6 +1590,8 @@ def build_wizard_ui(
             if _wizard_state["step3_content"]:
                 _render_ad_settings_result()
                 return
+
+            _render_current_ad_card(include_setting=True)
 
             _render_budget_planner_card()
 
@@ -1553,6 +1750,8 @@ def build_wizard_ui(
 
             _render_export_bar(3)
 
+            _render_checkup_card(_wizard_state.get("step3_content", ""))
+
             # Previous steps context (collapsible)
             if _wizard_state["step1_content"]:
                 with ui.expansion(
@@ -1643,6 +1842,8 @@ def build_wizard_ui(
                 _wizard_state["_regen_s3_status"] = regen_s3_status
                 _wizard_state["_regen_s3_btn"] = regen_s3_btn
 
+            _render_ai_chat("adset", lambda: _wizard_state.get("step3_content", ""))
+
             # Navigation
             _render_export_bar(3)
 
@@ -1687,6 +1888,7 @@ def build_wizard_ui(
                 strategy_context=_wizard_state.get("step1_content", ""),
                 content_context=_wizard_state.get("step2_content", ""),
                 budget_plan_context=_wizard_state.get("budget_plan_text", ""),
+                current_ad=_collect_current_ad(),
             )
             loop = asyncio.get_running_loop()
             if engine == "coordinate":
@@ -1755,6 +1957,7 @@ def build_wizard_ui(
                 strategy_context=_wizard_state.get("step1_content", ""),
                 content_context=_wizard_state.get("step2_content", ""),
                 budget_plan_context=_wizard_state.get("budget_plan_text", ""),
+                current_ad=_collect_current_ad(),
             )
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
@@ -1787,9 +1990,7 @@ def build_wizard_ui(
         if not _wizard_state["step3_content"]:
             ui.notify("광고 세팅 가이드를 먼저 만들어 주세요.", type="warning")
             return
-        _wizard_state["current_step"] = 4
-        _render_step_indicator()
-        _render_current_step()
+        ui.navigate.to("/plan/proposal")
 
     # ── Step 4: Operational Proposal ─────────────────────────────────────────
 
@@ -1864,6 +2065,8 @@ def build_wizard_ui(
                 docx_handler=lambda: _export_proposal_default(),
                 pdf_handler=lambda: _export_proposal_default_pdf(),
             )
+
+            _render_checkup_card(_wizard_state.get("step4_content", ""))
 
             # Previous steps context (collapsible)
             if _wizard_state["step1_content"]:
@@ -1954,6 +2157,8 @@ def build_wizard_ui(
                 _wizard_state["_regen_s4_spinner"] = regen_s4_spinner
                 _wizard_state["_regen_s4_status"] = regen_s4_status
                 _wizard_state["_regen_s4_btn"] = regen_s4_btn
+
+            _render_ai_chat("proposal", lambda: _wizard_state.get("step4_content", ""))
 
             # Navigation
             _render_export_bar(
@@ -2415,32 +2620,43 @@ def build_wizard_ui(
         elif step == 4:
             _render_step4()
 
-    # ── Initial render ──────────────────────────────────────────────────────
+    # ── Helper: load all steps from DB ────────────────────────────────────
 
-    # Load saved data from DB if available
-    pid_init = nicegui_app.storage.user.get("current_project_id")
-    if pid_init:
-        saved_strategy = get_latest_content(pid_init, content_type="strategy")
+    def _load_from_db(pid: int) -> None:
+        """Restore all step results from DB into _wizard_state."""
+        saved_strategy = get_latest_content(pid, content_type="strategy")
         if saved_strategy:
             _wizard_state["step1_content"] = saved_strategy["content"]
             _wizard_state["step1_sections"] = parse_strategy_sections(saved_strategy["content"])
-        saved_ad_settings = get_latest_content(pid_init, content_type="ad_settings")
+        # step2: try "content" first (new), fallback to "planning" (legacy)
+        saved_content = get_latest_content(pid, content_type="content")
+        if not saved_content:
+            saved_content = get_latest_content(pid, content_type="planning")
+        if saved_content:
+            _wizard_state["step2_content"] = saved_content["content"]
+            _wizard_state["step2_engine"] = saved_content.get("engine", "claude")
+        saved_ad_settings = get_latest_content(pid, content_type="ad_settings")
         if saved_ad_settings:
             _wizard_state["step3_content"] = saved_ad_settings["content"]
             _wizard_state["step3_sections"] = parse_ad_settings_sections(saved_ad_settings["content"])
-        saved_proposal = get_latest_content(pid_init, content_type="wizard_proposal")
+        saved_proposal = get_latest_content(pid, content_type="wizard_proposal")
         if saved_proposal:
             _wizard_state["step4_content"] = saved_proposal["content"]
             _wizard_state["step4_sections"] = parse_wizard_proposal_sections(saved_proposal["content"])
 
-    _render_step_indicator()
+    # ── Initial render ──────────────────────────────────────────────────────
+
+    pid_init = nicegui_app.storage.user.get("current_project_id")
+    if pid_init:
+        _load_from_db(pid_init)
+
     _render_current_step()
 
     # ── Public reset (called when project changes) ──────────────────────────
 
     def reset_wizard() -> None:
         """Reset wizard state for project switch."""
-        _wizard_state["current_step"] = 1
+        _wizard_state["current_step"] = initial_step
         _wizard_state["step1_content"] = ""
         _wizard_state["step1_sections"] = {}
         _wizard_state["step2_content"] = ""
@@ -2452,22 +2668,9 @@ def build_wizard_ui(
         pid = nicegui_app.storage.user.get("current_project_id")
         _wizard_state["project_id"] = pid
 
-        # Reload from DB
         if pid:
-            saved_strategy = get_latest_content(pid, content_type="strategy")
-            if saved_strategy:
-                _wizard_state["step1_content"] = saved_strategy["content"]
-                _wizard_state["step1_sections"] = parse_strategy_sections(saved_strategy["content"])
-            saved_ad_settings = get_latest_content(pid, content_type="ad_settings")
-            if saved_ad_settings:
-                _wizard_state["step3_content"] = saved_ad_settings["content"]
-                _wizard_state["step3_sections"] = parse_ad_settings_sections(saved_ad_settings["content"])
-            saved_proposal = get_latest_content(pid, content_type="wizard_proposal")
-            if saved_proposal:
-                _wizard_state["step4_content"] = saved_proposal["content"]
-                _wizard_state["step4_sections"] = parse_wizard_proposal_sections(saved_proposal["content"])
+            _load_from_db(pid)
 
-        _render_step_indicator()
         _render_current_step()
 
     # Return the reset function so planning.py can wire it up
