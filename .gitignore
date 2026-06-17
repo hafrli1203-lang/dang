@@ -57,3 +57,6 @@ Thumbs.db
 
 # 교재 원문(저작권) — 정제본(distilled_*.md)만 커밋
 app/knowledge/raw/
+
+# 품질 감사 산출물(생성물+벤치 추출본=저작권)
+_ops/review/

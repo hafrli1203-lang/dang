@@ -28,6 +28,19 @@ _HEADER = (
 )
 _FOOTER = "\n━━ (교재 지식 끝) ━━\n"
 
+# 환각·사실 왜곡 차단 — 모든 생성에 공통 적용(가짜 숫자가 가장 큰 품질 킬러).
+_FACT_LOCK = (
+    "\n\n━━ [사실관계 락 — 위반 시 출력 무효] ━━\n"
+    "- 입력 자료(매장 정보·행사·성과 데이터)에 있는 숫자·가격·기간·조건·상품명은 그대로 인용한다. "
+    "추정·반올림·재해석·창작 금지. 입력에 없는 가격/수치를 새로 지어내지 않는다.\n"
+    "- 입력에 없는 일별·소재별·캠페인별 수치(예: 특정 날짜 CTR)는 절대 생성·인용하지 않는다. "
+    "필요하면 '[매장 확인 필요]'로 표기한다.\n"
+    "- 매장 위키·데이터에 없는 추정치(객단가·마진·MAX CPA 등)는 반드시 '[가정]' 라벨 + 근거를 붙이고 사장님 확인을 권한다.\n"
+    "- 비교 기준치는 입력 벤치마크 또는 '광역시 표준'이라 명시한 값만 쓴다. 출처 없는 단정 수치 금지.\n"
+    "- 시즌·시점은 입력된 집행 기간/이벤트를 따른다. 다른 월·시즌을 임의 추정하지 않는다.\n"
+    "- '소재 N개 운영' 식으로 선언했으면 실제 산출물(카피 문구 등)을 N개 전량 제출한다. 골격·구조 설명만 하고 실물을 빼면 무효.\n"
+)
+
 
 def domain_knowledge(scope: str = "full") -> str:
     """주입용 전문 지식 블록. scope로 필요한 부분만 골라 토큰 절약."""
@@ -40,4 +53,4 @@ def domain_knowledge(scope: str = "full") -> str:
     else:  # full / strategy
         parts = [_DAANGN, _META, _SETTING, _COUPON]
     body = "\n\n".join(p for p in parts if p)
-    return f"\n\n{_HEADER}{body}{_FOOTER}" if body else ""
+    return f"\n\n{_HEADER}{body}{_FOOTER}{_FACT_LOCK}" if body else _FACT_LOCK
