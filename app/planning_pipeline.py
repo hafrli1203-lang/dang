@@ -22,6 +22,7 @@ from app.ai_engine import (
 from app.ai.providers import get_provider
 from app.ai.coordination import coordinate_generate
 from app.ai.output_validator import repair_output, get_schema
+from app.ai.quality_loop import refine_until_good
 from app.database import save_generated_content, get_project
 from app.engine.budget_planner import recommend_structure, plan_to_prompt_context
 from app import store_wiki
@@ -85,7 +86,8 @@ async def generate_full_plan(
         if on_progress:
             on_progress(msg)
 
-    async def _run(guide: str, prompt: str, eng: str, label: str, schema_key: Optional[str]) -> str:
+    async def _run(guide: str, prompt: str, eng: str, label: str, schema_key: Optional[str],
+                   quality_type: Optional[str] = None) -> str:
         """eng=='coordinate'면 Claude+GPT 조율, 아니면 단일. 스키마 있으면 1회 보정."""
         if eng == "coordinate":
             out = await coordinate_generate(loop, prompt, guide, label)
@@ -100,6 +102,16 @@ async def generate_full_plan(
                 )
             except Exception:
                 _log.exception("repair_output 실패 (%s)", schema_key)
+        if quality_type:
+            def _q_gen(prompt: str) -> str:
+                return get_provider("claude").generate_text(prompt, system_prompt=guide)
+            out = await loop.run_in_executor(
+                None,
+                lambda: refine_until_good(
+                    out, quality_type, generate=_q_gen, guide=guide,
+                    target=90, max_iters=1, on_progress=on_progress,
+                ),
+            )
         return out
 
     # 1) 전략 분석 — 기획(조율)
