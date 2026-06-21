@@ -155,68 +155,77 @@ def project_page() -> None:
             "주요 혜택/특징 (3~5가지, 줄바꿈 구분)"
         ).classes("w-full mt-2 dg-input").props("outlined dense rows=4")
 
-        # ══ 당근 광고 세팅 (기록용) — 당근 '광고그룹 수정' 화면 구조 ══
-        with ui.row().classes("w-full items-center no-wrap").style("margin-top: 18px"):
-            ui.label("당근 광고 세팅 (기록용)").classes("dg-section-title").style(
-                "font-size: 14px"
-            )
-            ui.space()
-            ui.button(
-                "전달에서 불러오기", icon="history", color=None,
-                on_click=lambda: _load_prev(),
-            ).props("flat dense no-caps").classes("dg-quick-link")
-        ui.label(
-            "당근에서 실제로 설정한 값을 기록해두면 다음 달에 다시 입력하지 않아도 돼요."
-        ).classes("dg-text-sm").style("margin-top: 2px")
+        # ══ 당근 광고 세팅 (선택) — 비우면 AI가 추천. 접이식 ══
+        with ui.expansion(
+            "당근 광고 세팅 (선택 — 비우면 AI가 추천해요)", icon="tune",
+        ).classes("w-full dg-settings-expansion").style("margin-top: 14px"):
+            ui.label(
+                "세팅은 '광고 기획'에서 AI가 매장 분석으로 추천해요. 여기선 'AI 추천 받기'로 "
+                "예산 구조를 미리 보거나, 당근에서 실제 설정한 값을 기록(다음 달 재사용·보고서 점검)할 수 있어요."
+            ).classes("dg-text-sm")
+            with ui.row().classes("w-full gap-2 items-center").style("margin-top: 8px"):
+                ui.button(
+                    "AI 추천 받기", icon="auto_awesome", color=None,
+                    on_click=lambda: _recommend_settings(),
+                ).props("flat dense no-caps").classes("dg-quick-link")
+                ui.button(
+                    "전달에서 불러오기", icon="history", color=None,
+                    on_click=lambda: _load_prev(),
+                ).props("flat dense no-caps").classes("dg-quick-link")
+            rec_box = ui.column().classes("w-full gap-0")
 
-        # ── 오디언스 타겟 ──
-        ui.label("오디언스 타겟").classes("dg-subsection")
-        target_radius_km_in = ui.input("지역 반경 (km, 예: 5)").classes(
-            "w-full dg-input"
-        ).props("outlined dense")
-        ui.label("성별").classes("dg-text-sm").style("margin-top: 8px")
-        target_gender_in = ui.radio(
-            ["모든 성별", "여성", "남성"]
-        ).props("inline").classes("dg-radio-inline")
-        ui.label("연령").classes("dg-text-sm").style("margin-top: 8px")
-        with ui.row().classes("gap-2 flex-wrap"):
-            for band in _AGE_BANDS:
-                chip = ui.element("div").classes("dg-age-chip")
-                with chip:
-                    ui.label(band)
-                chip.on("click", lambda _, b=band: _toggle_age(b))
-                age_chip_els[band] = chip
+            # ── 오디언스 타겟 ──
+            ui.label("오디언스 타겟").classes("dg-subsection")
+            target_radius_km_in = ui.input("지역 반경 (km, 예: 5)").classes(
+                "w-full dg-input"
+            ).props("outlined dense")
+            ui.label("성별").classes("dg-text-sm").style("margin-top: 8px")
+            target_gender_in = ui.radio(
+                ["모든 성별", "여성", "남성"]
+            ).props("inline").classes("dg-radio-inline")
+            ui.label("연령").classes("dg-text-sm").style("margin-top: 8px")
+            with ui.row().classes("gap-2 flex-wrap"):
+                for band in _AGE_BANDS:
+                    chip = ui.element("div").classes("dg-age-chip")
+                    with chip:
+                        ui.label(band)
+                    chip.on("click", lambda _, b=band: _toggle_age(b))
+                    age_chip_els[band] = chip
 
-        # ── 예산 및 입찰 ──
-        ui.label("예산 및 입찰").classes("dg-subsection")
-        with ui.grid(columns=2).classes("w-full gap-3"):
-            daily_budget_in = ui.input("일일 예산 (예: 10,000원)").classes(
-                "dg-input"
-            ).props("outlined dense")
-        # 손익 기준(선택) — MAX CPA(허용 문의당 비용) 계산용. 비우면 AI가 [가정]으로 처리.
-        with ui.grid(columns=2).classes("w-full gap-3"):
-            unit_price_in = ui.input("후속 객단가 (선택, 예: 100,000원)").classes(
-                "dg-input"
-            ).props("outlined dense")
-            margin_pct_in = ui.input("마진율 % (선택, 예: 40)").classes(
-                "dg-input"
-            ).props("outlined dense")
-        ui.label(
-            "객단가·마진을 넣으면 보고서·제안서의 MAX CPA(끄고/늘릴 손익 기준)가 추측이 아닌 실제 숫자로 잡혀요."
-        ).classes("dg-hint")
-        ui.label("입찰 방식").classes("dg-text-sm").style("margin-top: 8px")
-        bid_type_in = ui.radio(
-            ["자동 입찰", "수동 입찰"]
-        ).props("inline").classes("dg-radio-inline")
+            # ── 예산 및 입찰 ──
+            ui.label("예산 및 입찰").classes("dg-subsection")
+            with ui.grid(columns=2).classes("w-full gap-3"):
+                daily_budget_in = ui.input("일일 예산 (예: 10,000원)").classes(
+                    "dg-input"
+                ).props("outlined dense")
+            # 손익 기준(선택) — MAX CPA(허용 문의당 비용) 계산용. 비우면 AI가 [가정]으로 처리.
+            with ui.grid(columns=2).classes("w-full gap-3"):
+                unit_price_in = ui.input("후속 객단가 (선택, 예: 100,000원)").classes(
+                    "dg-input"
+                ).props("outlined dense")
+                margin_pct_in = ui.input("마진율 % (선택, 예: 40)").classes(
+                    "dg-input"
+                ).props("outlined dense")
+            ui.label(
+                "객단가·마진을 넣으면 보고서·제안서의 MAX CPA(끄고/늘릴 손익 기준)가 추측이 아닌 실제 숫자로 잡혀요."
+            ).classes("dg-hint")
+            # 입찰 방식 — 자동·수동 둘 다 선택 가능 (페어 전략)
+            ui.label("입찰 방식").classes("dg-text-sm").style("margin-top: 8px")
+            with ui.row().classes("gap-4 items-center"):
+                auto_bid_cb = ui.checkbox("자동 입찰")
+                manual_bid_cb = ui.checkbox("수동 입찰")
+            ui.label(
+                "자동·수동을 같이 시작해서, 수동 노출이 안정되면 자동을 꺼요. (페어 전략)"
+            ).classes("dg-hint")
 
-        # ── 소재 & 쿠폰 ──
-        ui.label("소재 & 쿠폰").classes("dg-subsection")
-        ad_titles_in = ui.textarea(
-            "소재(광고) 제목들 — 줄바꿈으로 여러 개"
-        ).classes("w-full dg-input").props("outlined dense rows=3")
-        coupon_info_in = ui.input(
-            "쿠폰 (예: 변색렌즈 0원 / 6월 30일까지)"
-        ).classes("w-full mt-2 dg-input").props("outlined dense")
+            # ── 소재 & 쿠폰 ──
+            ui.label("소재 & 쿠폰").classes("dg-subsection")
+            ad_titles_in = ui.textarea(
+                "소재(광고) 제목들 — 줄바꿈으로 여러 개"
+            ).classes("w-full dg-input").props("outlined dense rows=3")
+            coupon_info_in = ui.input(
+                "쿠폰 (예: 변색렌즈 0원 / 6월 30일까지)"
+            ).classes("w-full mt-2 dg-input").props("outlined dense")
 
         with ui.row().classes("mt-4 gap-2 w-full items-center"):
             delete_btn = ui.button(
@@ -551,7 +560,9 @@ def project_page() -> None:
         target_radius_km_in.value = values.get("target_radius_km", "") or ""
         daily_budget_in.value = values.get("daily_budget", "") or ""
         target_gender_in.value = values.get("target_gender", "") or None
-        bid_type_in.value = values.get("bid_type", "") or None
+        _bid = values.get("bid_type", "") or ""
+        auto_bid_cb.value = "자동" in _bid
+        manual_bid_cb.value = "수동" in _bid
         selected_ages.clear()
         selected_ages.update(a for a in (values.get("target_age", "") or "").split(",") if a)
         _refresh_age_chips()
@@ -579,6 +590,64 @@ def project_page() -> None:
         reference_in.value = prev.get("reference_url", "") or ""
         _prefill_ad_record_from(prev)
         ui.notify("전달 설정을 불러왔어요. 캠페인명·월만 바꿔주세요.", type="positive")
+
+    def _recommend_settings() -> None:
+        """예산 룰엔진(budget_planner)으로 자동/수동 페어·일예산 구조를 추천.
+
+        결정론적으로 아는 것(일예산·자동+수동 입찰)만 채우고, 구조를 보여준다.
+        성별·연령·반경은 매장 분석이 필요해 '광고 기획' 단계로 안내한다(추측 금지).
+        """
+        import re as _re
+        from app.engine.budget_planner import recommend_structure
+
+        raw_daily = _re.sub(r"[^\d]", "", daily_budget_in.value or "")
+        daily = int(raw_daily) if raw_daily else 0
+        if not daily:
+            raw_m = _re.sub(r"[^\d]", "", budget_in.value or "")
+            daily = int(raw_m) // 30 if raw_m else 0  # 월예산 → 일예산 보수적 환산
+        if daily <= 0:
+            ui.notify(
+                "'예산' 또는 '일일 예산'을 먼저 입력하면 그 예산에 맞춰 추천할게요.",
+                type="warning",
+            )
+            return
+
+        raw_price = _re.sub(r"[^\d]", "", unit_price_in.value or "")
+        raw_margin = _re.sub(r"[^\d.]", "", margin_pct_in.value or "")
+        target_cpa = None
+        if raw_price:
+            margin = max(0.0, min(1.0, (float(raw_margin) / 100) if raw_margin else 0.0))
+            target_cpa = int(int(raw_price) * (1 - margin))
+
+        plan = recommend_structure(
+            daily, region=(region_in.value or "우리동네").strip(), target_cpa=target_cpa,
+        )
+
+        # 확실한 값만 채움
+        if not (daily_budget_in.value or "").strip():
+            daily_budget_in.value = f"{daily:,}원"
+        modes = {c.bid_mode for c in plan.campaigns}
+        auto_bid_cb.value = "자동" in modes
+        manual_bid_cb.value = "수동" in modes
+        if not (target_radius_km_in.value or "").strip():
+            target_radius_km_in.value = "3"  # 시작 기본값(상권 밀집도 보고 조정)
+
+        rec_box.clear()
+        with rec_box:
+            with ui.element("div").classes("dg-banner dg-banner-info w-full").style(
+                "margin-top: 8px"
+            ):
+                ui.label(f"추천 구조 — {plan.mode_label}").style("font-weight: 700")
+                for c in plan.campaigns:
+                    ui.label(
+                        f"· {c.age} / {c.bid_mode} / 하루 {c.daily_budget:,}원 — {c.purpose}"
+                    ).classes("dg-text-sm")
+                if plan.feasibility_note:
+                    ui.label(plan.feasibility_note).classes("dg-hint")
+                ui.label(
+                    "성별·연령·반경은 '광고 기획' 단계에서 매장 분석 기반으로 더 정밀하게 추천돼요."
+                ).classes("dg-hint")
+        ui.notify("예산에 맞춘 구조를 추천했어요. 일예산·입찰(자동+수동)을 채웠어요.", type="positive")
 
     def _fill_form(p: dict | None) -> None:
         values = p or {}
@@ -633,7 +702,9 @@ def project_page() -> None:
             "target_radius_km": (target_radius_km_in.value or "").strip(),
             "target_gender": target_gender_in.value or "",
             "target_age": ",".join(ordered_ages),
-            "bid_type": bid_type_in.value or "",
+            "bid_type": ", ".join(
+                m for m, cb in (("자동 입찰", auto_bid_cb), ("수동 입찰", manual_bid_cb)) if cb.value
+            ),
             "daily_budget": (daily_budget_in.value or "").strip(),
             "ad_titles": (ad_titles_in.value or "").strip(),
             "coupon_info": (coupon_info_in.value or "").strip(),
