@@ -828,17 +828,107 @@ body, .q-page {
 }
 .dg-history-item:hover { border-color: var(--dg-primary) !important; }
 
-/* == Markdown Prose == */
-.dg-prose { font-size: 14px !important; line-height: 1.8 !important; color: var(--dg-text-secondary) !important; letter-spacing: -0.1px !important; }
-.dg-prose h2 {
-    font-size: 18px !important; font-weight: 700 !important;
-    color: var(--dg-text-primary) !important; margin-top: 28px !important; margin-bottom: 12px !important;
-    letter-spacing: -0.3px !important;
+/* == Markdown Prose — 문서급 가독성 (보고서·기획·소식글 공통) == */
+.dg-prose {
+    font-size: 15px !important;
+    line-height: 1.85 !important;
+    color: var(--dg-text-secondary) !important;
+    letter-spacing: -0.1px !important;
+    word-break: keep-all !important;        /* 한글: 단어 단위 줄바꿈 */
+    overflow-wrap: anywhere !important;      /* 긴 URL 등은 강제 줄바꿈 */
 }
-.dg-prose h3 { font-size: 15px !important; font-weight: 600 !important; color: var(--dg-text-primary) !important; letter-spacing: -0.2px !important; margin-top: 20px !important; }
-.dg-prose table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; font-size: 13px !important; }
-.dg-prose th { background: var(--dg-surface) !important; padding: 8px 12px !important; font-weight: 600 !important; text-align: left !important; border-bottom: 2px solid var(--dg-border) !important; }
-.dg-prose td { padding: 8px 12px !important; border-bottom: 1px solid var(--dg-border-light) !important; }
+/* 읽기 좋은 가로폭: 본문 블록은 좁은 단(80ch), 표/코드/이미지는 전체폭 */
+.dg-prose > * { max-width: 80ch; }
+.dg-prose > table, .dg-prose > pre, .dg-prose > img { max-width: 100%; }
+.dg-prose > :first-child { margin-top: 0 !important; }
+.dg-prose > :last-child { margin-bottom: 0 !important; }
+
+.dg-prose p { margin: 0 0 14px 0 !important; }
+
+/* 제목 위계 — 문서 섹션감 */
+.dg-prose h1 {
+    font-size: 24px !important; font-weight: 800 !important;
+    color: var(--dg-text-primary) !important; letter-spacing: -0.5px !important;
+    line-height: 1.3 !important; margin: 6px 0 18px 0 !important;
+}
+.dg-prose h2 {
+    font-size: 19px !important; font-weight: 700 !important;
+    color: var(--dg-text-primary) !important; letter-spacing: -0.3px !important;
+    line-height: 1.35 !important; margin: 32px 0 14px 0 !important;
+    padding-bottom: 8px !important; border-bottom: 1px solid var(--dg-border) !important;
+}
+/* 섹션 제목 앞 오렌지 악센트 바 */
+.dg-prose h2::before {
+    content: ""; display: inline-block;
+    width: 4px; height: 0.95em; margin-right: 9px;
+    background: var(--dg-primary); border-radius: 2px; vertical-align: -2px;
+}
+.dg-prose h3 {
+    font-size: 16px !important; font-weight: 700 !important;
+    color: var(--dg-text-primary) !important; letter-spacing: -0.2px !important;
+    margin: 22px 0 8px 0 !important;
+}
+.dg-prose h4 {
+    font-size: 14px !important; font-weight: 700 !important;
+    color: var(--dg-text-secondary) !important; margin: 18px 0 6px 0 !important;
+}
+
+/* 목록 */
+.dg-prose ul, .dg-prose ol { margin: 4px 0 14px 0 !important; padding-left: 22px !important; }
+.dg-prose li { margin: 5px 0 !important; padding-left: 2px !important; }
+.dg-prose li::marker { color: var(--dg-primary); }
+.dg-prose ul ul, .dg-prose ol ol, .dg-prose ul ol, .dg-prose ol ul { margin: 4px 0 !important; }
+
+/* 강조 */
+.dg-prose strong { color: var(--dg-text-primary) !important; font-weight: 700 !important; }
+.dg-prose em { font-style: italic !important; }
+
+/* 인용 — 사장님 멘트/핵심 포인트 */
+.dg-prose blockquote {
+    margin: 14px 0 !important; padding: 10px 16px !important;
+    border-left: 3px solid var(--dg-primary) !important;
+    background: var(--dg-primary-light) !important;
+    border-radius: 0 var(--dg-radius-xs) var(--dg-radius-xs) 0 !important;
+    color: var(--dg-text-primary) !important;
+}
+.dg-prose blockquote p { margin: 0 !important; }
+
+/* 구분선 */
+.dg-prose hr { border: 0 !important; border-top: 1px solid var(--dg-border-light) !important; margin: 24px 0 !important; }
+
+/* 코드 */
+.dg-prose code {
+    font-family: 'SF Mono','Consolas','Monaco',monospace !important;
+    font-size: 0.88em !important; background: var(--dg-surface) !important;
+    padding: 1px 6px !important; border-radius: var(--dg-radius-xs) !important;
+    color: var(--dg-primary-hover) !important;
+}
+.dg-prose pre {
+    background: var(--dg-text-primary) !important; color: #E6E7EA !important;
+    padding: 14px 16px !important; border-radius: var(--dg-radius-sm) !important;
+    overflow-x: auto !important; margin: 14px 0 !important; font-size: 13px !important;
+}
+.dg-prose pre code { background: transparent !important; color: inherit !important; padding: 0 !important; }
+
+/* 링크 */
+.dg-prose a { color: var(--dg-primary-hover) !important; text-decoration: underline !important; text-underline-offset: 2px !important; }
+
+/* 표 — 문서 표 느낌(라운드 테두리 + 그림자 + 제브라 + hover) */
+.dg-prose table {
+    width: 100% !important; border-collapse: separate !important; border-spacing: 0 !important;
+    margin: 16px 0 !important; font-size: 13.5px !important;
+    border: 1px solid var(--dg-border) !important; border-radius: var(--dg-radius-sm) !important;
+    overflow: hidden !important; box-shadow: var(--dg-shadow-sm) !important;
+}
+.dg-prose th {
+    background: var(--dg-surface) !important; padding: 10px 14px !important;
+    font-weight: 700 !important; text-align: left !important; color: var(--dg-text-primary) !important;
+    border-bottom: 1px solid var(--dg-border) !important;
+}
+.dg-prose td { padding: 9px 14px !important; border-bottom: 1px solid var(--dg-border-light) !important; vertical-align: top !important; }
+.dg-prose tbody tr:last-child td { border-bottom: 0 !important; }
+.dg-prose tbody tr:nth-child(even) { background: rgba(15, 23, 42, 0.015) !important; }
+.dg-prose tbody tr:hover { background: var(--dg-primary-light) !important; }
 
 /* == Radio == */
 .dg-radio .q-radio__label { font-size: 14px !important; font-weight: 500 !important; }
