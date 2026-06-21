@@ -105,6 +105,37 @@ def parse_research_result(text: str) -> dict:
     return result
 
 
+def format_research_insight(insight: dict, keyword: str = "") -> str:
+    """리서치 인사이트 dict → 사람이 읽고 기획 프롬프트에 주입 가능한 마크다운 요약.
+
+    /research 결과를 매장별로 저장하고, 전략·소식글 빌더가 '실제 고객의 목소리'
+    근거로 재사용한다(리서치 선행 → 기획 연결). 빈 결과면 '' 반환.
+    """
+    if not isinstance(insight, dict):
+        return ""
+    labels = (
+        ("pain_points", "고충"), ("desires", "욕구"), ("real_expressions", "실제 표현"),
+        ("offer_signals", "혜택 반응 신호"), ("content_angles", "콘텐츠 앵글"),
+        ("hook_ideas", "후크 후보"),
+    )
+    lines: list[str] = []
+    for key, name in labels:
+        vals = insight.get(key)
+        if isinstance(vals, list):
+            items = [str(v).strip() for v in vals if str(v).strip()]
+            if items:
+                lines.append(f"- {name}: " + " / ".join(items[:6]))
+    verdict = str(insight.get("verdict", "")).strip()
+    if not lines and not verdict:
+        return ""
+    kw = (keyword or "").strip()
+    out = ["커뮤니티 리서치 요약" + (f" — '{kw}'" if kw else "")]
+    if verdict:
+        out.append(f"- 종합: {verdict}")
+    out.extend(lines)
+    return "\n".join(out)
+
+
 def _extract_json_object(text: str):
     if not text:
         return None

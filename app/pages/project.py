@@ -193,6 +193,17 @@ def project_page() -> None:
             daily_budget_in = ui.input("일일 예산 (예: 10,000원)").classes(
                 "dg-input"
             ).props("outlined dense")
+        # 손익 기준(선택) — MAX CPA(허용 문의당 비용) 계산용. 비우면 AI가 [가정]으로 처리.
+        with ui.grid(columns=2).classes("w-full gap-3"):
+            unit_price_in = ui.input("후속 객단가 (선택, 예: 100,000원)").classes(
+                "dg-input"
+            ).props("outlined dense")
+            margin_pct_in = ui.input("마진율 % (선택, 예: 40)").classes(
+                "dg-input"
+            ).props("outlined dense")
+        ui.label(
+            "객단가·마진을 넣으면 보고서·제안서의 MAX CPA(끄고/늘릴 손익 기준)가 추측이 아닌 실제 숫자로 잡혀요."
+        ).classes("dg-hint")
         ui.label("입찰 방식").classes("dg-text-sm").style("margin-top: 8px")
         bid_type_in = ui.radio(
             ["자동 입찰", "수동 입찰"]
@@ -546,6 +557,8 @@ def project_page() -> None:
         _refresh_age_chips()
         ad_titles_in.value = values.get("ad_titles", "") or ""
         coupon_info_in.value = values.get("coupon_info", "") or ""
+        unit_price_in.value = values.get("unit_price", "") or ""
+        margin_pct_in.value = values.get("margin_pct", "") or ""
 
     def _load_prev() -> None:
         """현재 매장명 기준 직전 캠페인의 타겟/예산/소재/쿠폰을 불러와 프리필."""
@@ -624,6 +637,8 @@ def project_page() -> None:
             "daily_budget": (daily_budget_in.value or "").strip(),
             "ad_titles": (ad_titles_in.value or "").strip(),
             "coupon_info": (coupon_info_in.value or "").strip(),
+            "unit_price": (unit_price_in.value or "").strip(),
+            "margin_pct": (margin_pct_in.value or "").strip(),
         }
 
     def _save() -> None:

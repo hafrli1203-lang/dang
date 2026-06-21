@@ -9,7 +9,7 @@ from nicegui import ui, app as nicegui_app
 from app.common import create_nav, next_step_bar
 from app.theme import section_header
 from app.export_manager import ExportManager
-from app.paths import CHARTS_DIR
+from app.paths import CHARTS_DIR, sanitize_filename
 from app.database import (
     get_project,
     get_projects,
@@ -84,7 +84,8 @@ def _rows_from_daangn_breakdown(file_bytes: bytes) -> tuple[List[Dict], dict] | 
     """
     try:
         parsed = parse_demographic_xlsx(file_bytes)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _report_log.debug("long-format breakdown 파싱 실패, 기본 파서로 폴백: %s", exc)
         return None
     ts = parsed.get("timeseries") or []
     if not ts:
@@ -98,9 +99,26 @@ def _rows_from_daangn_breakdown(file_bytes: bytes) -> tuple[List[Dict], dict] | 
         "regulars": r["regulars"],
         "coupons": r["coupons"],
     } for r in ts]
+    # 세그먼트 심화(캠페인 판정) 요약 — 슬라이드 보고서의 '세그먼트' 장에 쓴다.
+    segment_rows: List[Dict] = []
+    try:
+        from app.reporting.demographic import judge_campaigns
+        campaigns = parsed.get("campaigns") or []
+        judged = judge_campaigns(campaigns)
+        judged.sort(key=lambda j: j.campaign.cost, reverse=True)
+        for j in judged[:8]:
+            segment_rows.append({
+                "label": j.campaign.name,
+                "cost": j.campaign.cost,
+                "cpa": j.campaign.cpa,
+                "verdict": j.verdict,
+            })
+    except Exception:  # noqa: BLE001
+        segment_rows = []
     info = {
         "metrics_available": parsed.get("metrics_available", []),
         "campaign_names": parsed.get("meta", {}).get("campaign_names", []),
+        "segment_rows": segment_rows,
     }
     return rows, info
 
@@ -343,14 +361,13 @@ def _create_sample_excel() -> None:
 
 # -- Page --
 
-@ui.page("/report")
-def report_page() -> None:
-    create_nav("/report")
-
+def render_report_body() -> None:
+    """성과 보고서 본문(create_nav 제외). /report 병합 페이지의 '성과 요약' 탭에서 재사용."""
     page_state: dict = {
         "rows": [], "kpi": {}, "report_content": "",
         "engine": "claude", "c_text": "", "g_text": "", "cancelled": False,
         "metrics_available": set(FULL_METRICS),
+        "segment_rows": [],
     }
 
     with ui.column().classes("dg-page-content w-full gap-5"):
@@ -367,14 +384,11 @@ def report_page() -> None:
         with ui.card().classes("dg-card w-full"):
             section_header("upload_file", "성과 데이터 입력", "CSV/XLSX 파일을 올리거나 직접 입력해 주세요.")
 
-            with ui.tabs().classes("w-full dg-tabs") as tabs:
-                tab_upload = ui.tab("파일 업로드")
-                tab_manual = ui.tab("수기 입력")
+            # 입력 평탄화: 파일 업로드를 기본으로 바로 보여주고, 수기 입력은 접이식으로(탭 중첩 제거).
+            with ui.column().classes("w-full gap-3"):
 
-            with ui.tab_panels(tabs, value=tab_upload).classes("w-full"):
-
-                # -- File upload panel --
-                with ui.tab_panel(tab_upload):
+                # -- File upload (기본) --
+                with ui.column().classes("w-full"):
                     with ui.element("div").classes("dg-banner dg-banner-info w-full mb-3"):
                         ui.icon("info", size="18px")
                         ui.label(
@@ -402,8 +416,8 @@ def report_page() -> None:
                     upload_summary = ui.column().classes("w-full mt-2 hidden")
                     upload_preview = ui.column().classes("w-full mt-3 hidden")
 
-                # -- Manual input panel --
-                with ui.tab_panel(tab_manual):
+                # -- Manual input (접이식) --
+                with ui.expansion("직접 수기 입력", icon="edit_note").classes("w-full dg-expansion").props("dense"):
                     manual_rows_container = ui.column().classes("w-full gap-2")
                     _manual_inputs: List[dict] = []
 
@@ -838,14 +852,17 @@ def report_page() -> None:
                 "보고서 생성", icon="description",
                 on_click=lambda: _generate_report(),
             ).classes("dg-btn-primary")
-            export_default_btn = ui.button(
-                "기본 폴더에 저장", icon="save",
-                on_click=lambda: _export_default(),
-            ).classes("dg-btn-success")
-            export_saveas_btn = ui.button(
-                "다른 위치로 저장...", icon="save_as",
-                on_click=lambda: _export_saveas(),
+            # 내보내기는 메뉴 하나로 묶는다(버튼 과밀 방지). 광고주용은 슬라이드를 추천 상위에.
+            export_btn = ui.button("내보내기", icon="download").props(
+                "icon-right=expand_more"
             ).classes("dg-btn-secondary")
+            with export_btn:
+                with ui.menu().props('anchor="bottom left" self="top left"'):
+                    ui.menu_item("슬라이드 PPT (추천)", on_click=lambda: _export_pptx())
+                    ui.menu_item("슬라이드 HTML", on_click=lambda: _export_slides())
+                    ui.separator()
+                    ui.menu_item("문서(DOCX) · 기본 폴더", on_click=lambda: _export_default())
+                    ui.menu_item("문서(DOCX) · 다른 위치로", on_click=lambda: _export_saveas())
             cancel_btn = ui.button(
                 "중단", icon="stop",
                 on_click=lambda: _cancel_generation(),
@@ -866,6 +883,8 @@ def report_page() -> None:
 
         # -- Report preview --
         report_card = ui.card().classes("dg-card w-full hidden")
+        # "이렇게 하겠다" 운영 계획 — 퍼널/지표 아래, 본문 위에 먼저 띄운다(중간 보고서의 핵심).
+        action_container = ui.column().classes("w-full hidden")
         report_md = ui.markdown("").classes("w-full dg-prose")
         judgment_container = ui.column().classes("w-full hidden")
 
@@ -878,8 +897,64 @@ def report_page() -> None:
 
         with report_card:
             section_header("summarize", "분석 결과")
+            action_container
             report_md
             judgment_container
+
+        def _render_action_plan(content: str) -> None:
+            """'그래서 이렇게 하겠다' — Next Actions + 다음 실험을 본문 위에 카드로 먼저 띄운다.
+
+            데이터(퍼널·지표)만 보고 끝나지 않도록, 중간 보고서의 핵심인 '다음 운영 계획'을
+            구조화해 앞단에 노출한다. 이미 _parse_ai_insights가 뽑은 구조를 재사용한다.
+            """
+            insights = _parse_ai_insights(content)
+            next_actions = [a for a in (insights.get("next_actions") or []) if str(a).strip()]
+            experiments = insights.get("experiments") or []
+            if not next_actions and not experiments:
+                action_container.classes(add="hidden")
+                return
+            action_container.clear()
+            with action_container:
+                with ui.element("div").classes("dg-banner dg-banner-info w-full"):
+                    ui.icon("playlist_add_check", size="18px")
+                    ui.label("다음 기간 운영 계획 — 이렇게 하겠습니다").style(
+                        "font-size: 15px; font-weight: 700; color: var(--dg-text-primary)"
+                    )
+                if next_actions:
+                    with ui.column().classes("w-full gap-1").style("margin-top: 4px"):
+                        for i, act in enumerate(next_actions, 1):
+                            with ui.row().classes("items-start gap-2 w-full no-wrap"):
+                                ui.label(str(i)).classes("dg-step-num").style(
+                                    "min-width: 22px; height: 22px; border-radius: 6px;"
+                                    "background: var(--dg-primary); color: white; font-size: 12px;"
+                                    "font-weight: 700; display: flex; align-items: center;"
+                                    "justify-content: center; flex-shrink: 0; margin-top: 2px"
+                                )
+                                ui.label(str(act)).style(
+                                    "font-size: 14px; line-height: 1.5; color: var(--dg-text-secondary)"
+                                )
+                if experiments:
+                    ui.label("실행 계획 (우선순위·변경·성공 기준·일정)").style(
+                        "font-size: 13px; font-weight: 600; color: var(--dg-text-tertiary); margin-top: 8px"
+                    )
+                    ui.table(
+                        columns=[
+                            {"name": "priority", "label": "순위", "field": "priority", "align": "left"},
+                            {"name": "change", "label": "변경 내용", "field": "change", "align": "left"},
+                            {"name": "success_criteria", "label": "성공 기준", "field": "success_criteria", "align": "left"},
+                            {"name": "schedule", "label": "일정", "field": "schedule", "align": "left"},
+                        ],
+                        rows=[
+                            {
+                                "priority": e.get("priority", "-"),
+                                "change": e.get("change", "-"),
+                                "success_criteria": e.get("success_criteria", "-"),
+                                "schedule": e.get("schedule", "-"),
+                            }
+                            for e in experiments
+                        ],
+                    ).classes("w-full dg-table").props("dense flat bordered")
+            action_container.classes(remove="hidden")
 
         def _render_judgment_table(content: str) -> None:
             insights = _parse_ai_insights(content)
@@ -943,6 +1018,7 @@ def report_page() -> None:
 
         async def _handle_upload(e) -> None:
             try:
+                page_state["segment_rows"] = []  # 새 업로드마다 초기화(데모그래픽 양식만 다시 채움)
                 file_bytes = await e.file.read()
                 filename = e.file.name or ""
                 ext = Path(filename).suffix.lower()
@@ -994,6 +1070,7 @@ def report_page() -> None:
                         warning = None
                         avail = set(info.get("metrics_available", []))
                         page_state["metrics_available"] = avail
+                        page_state["segment_rows"] = info.get("segment_rows", [])
                         missing = [
                             name for key, name in (
                                 ("inquiries", "문의"), ("regulars", "단골"), ("coupons", "쿠폰"),
@@ -1104,6 +1181,7 @@ def report_page() -> None:
             period_container.clear()
             period_card.classes("hidden")
             report_md.set_content("")
+            action_container.classes(add="hidden")
             report_card.classes("hidden")
             upload_preview.clear()
             upload_preview.classes("hidden")
@@ -1120,6 +1198,7 @@ def report_page() -> None:
             if rpt:
                 page_state["report_content"] = rpt["content"]
                 report_md.set_content(rpt["content"])
+                _render_action_plan(rpt["content"])
                 _render_judgment_table(rpt["content"])
                 report_card.classes(remove="hidden")
 
@@ -1204,6 +1283,7 @@ def report_page() -> None:
                 except Exception:
                     _report_log.exception("매장 위키 자동 갱신 실패 (보고서는 정상 저장됨)")
                 report_md.set_content(content)
+                _render_action_plan(content)
                 _render_judgment_table(content)
                 report_card.classes(remove="hidden")
 
@@ -1303,7 +1383,7 @@ def report_page() -> None:
                 raise ValueError("DOCX 만들기가 90초를 넘겨 중단했어요. 데이터 양을 줄여서 다시 시도해 주세요.")
 
         async def _export_default() -> None:
-            export_default_btn.props("disabled loading")
+            export_btn.props("disabled loading")
             download_status.classes(remove="hidden")
             download_status.set_text("DOCX 파일을 준비하고 있어요...")
             try:
@@ -1323,10 +1403,10 @@ def report_page() -> None:
                 download_status.set_text("내보내지 못했어요")
                 ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
             finally:
-                export_default_btn.props(remove="disabled loading")
+                export_btn.props(remove="disabled loading")
 
         async def _export_saveas() -> None:
-            export_saveas_btn.props("disabled loading")
+            export_btn.props("disabled loading")
             download_status.classes(remove="hidden")
             download_status.set_text("DOCX 파일을 준비하고 있어요...")
             try:
@@ -1343,8 +1423,104 @@ def report_page() -> None:
                 download_status.set_text("내보내지 못했어요")
                 ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
             finally:
-                export_saveas_btn.props(remove="disabled loading")
+                export_btn.props(remove="disabled loading")
+
+        def _gather_slide_data() -> tuple:
+            """슬라이드(HTML/PPTX) 공용 데이터 수집 → (meta, kpi, insights, stages, safe_name)."""
+            content = page_state.get("report_content") or ""
+            kpi = page_state.get("kpi") or {}
+            if not content.strip():
+                raise ValueError("먼저 'AI 보고서 생성'을 눌러 보고서를 만들어 주세요. (액션 슬라이드에 필요해요)")
+            pid = nicegui_app.storage.user.get("current_project_id")
+            project = get_project(pid) if pid else {}
+            available = page_state.get("metrics_available") or FULL_METRICS
+            t_click = kpi.get("total_clicks", 0)
+            t_coup = kpi.get("total_coupons", 0)
+            coupon_rate = (t_coup / t_click * 100) if t_click > 0 else 0.0
+            stages, _has = build_funnel_stages(
+                impressions=kpi.get("total_impressions", 0), clicks=t_click,
+                ctr=kpi.get("ctr", 0), cpc=kpi.get("cpc", 0), cpm=kpi.get("cpm", 0),
+                conversions={
+                    "inquiries": (kpi.get("total_inquiries", 0), kpi.get("cvr_click_inquiry", 0), kpi.get("cpa", 0)),
+                    "regulars": (kpi.get("total_regulars", 0), kpi.get("cvr_click_regular", 0), kpi.get("cpr", 0)),
+                    "coupons": (t_coup, coupon_rate, kpi.get("cp_coupon", 0)),
+                },
+                available=available,
+            )
+            meta = {
+                "name": (project or {}).get("name", ""),
+                "campaign_name": (project or {}).get("campaign_name", ""),
+                "region": (project or {}).get("region", ""),
+                "period": (project or {}).get("period", ""),
+            }
+            safe = sanitize_filename(meta["name"] or "보고서")
+            segs = page_state.get("segment_rows") or []
+            return meta, kpi, _parse_ai_insights(content), stages, segs, safe
+
+        def _build_slides_bytes() -> tuple[bytes, str]:
+            """성과 데이터+AI 보고서를 슬라이드 HTML로. (bytes, filename)."""
+            from app.reporting.slides_html import build_slides_html
+            from datetime import datetime
+            meta, kpi, insights, stages, segs, safe = _gather_slide_data()
+            html = build_slides_html(meta, kpi, insights, funnel_stages=stages,
+                                     segment_rows=segs,
+                                     generated_at=datetime.now().strftime("%Y-%m-%d"))
+            return html.encode("utf-8"), f"{safe}_성과보고서_슬라이드_{datetime.now().strftime('%Y%m%d')}.html"
+
+        def _build_pptx_bytes() -> tuple[bytes, str]:
+            """성과 데이터+AI 보고서를 편집 가능한 PPTX로. (bytes, filename)."""
+            from app.reporting.slides_pptx import build_slides_pptx
+            from datetime import datetime
+            meta, kpi, insights, stages, segs, safe = _gather_slide_data()
+            data = build_slides_pptx(meta, kpi, insights, funnel_stages=stages,
+                                     segment_rows=segs,
+                                     generated_at=datetime.now().strftime("%Y-%m-%d"))
+            return data, f"{safe}_성과보고서_슬라이드_{datetime.now().strftime('%Y%m%d')}.pptx"
+
+        async def _do_slide_export(builder, btn) -> None:
+            btn.props("disabled loading")
+            download_status.classes(remove="hidden")
+            download_status.set_text("슬라이드 보고서를 만들고 있어요...")
+            try:
+                loop = asyncio.get_running_loop()
+                data, fname = await loop.run_in_executor(None, builder)
+                ExportManager.save_default(data, filename=fname)
+                download_status.set_text(f"저장했어요: {fname}")
+                hint = "\n브라우저로 열고 Ctrl+P로 PDF 저장도 돼요." if fname.endswith(".html") else "\n파워포인트에서 열어 자유롭게 편집하세요."
+                ui.notify(f"{fname}{hint}", type="positive", timeout=8000, close_button="확인")
+            except ValueError as ve:
+                ui.notify(str(ve), type="warning")
+            except Exception as exc:
+                download_status.set_text("내보내지 못했어요")
+                ui.notify(f"슬라이드를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
+            finally:
+                btn.props(remove="disabled loading")
+
+        async def _export_slides() -> None:
+            await _do_slide_export(_build_slides_bytes, export_btn)
+
+        async def _export_pptx() -> None:
+            await _do_slide_export(_build_pptx_bytes, export_btn)
 
         # initial load -- use background_tasks to schedule async init
         import nicegui
         nicegui.background_tasks.create(_load_saved_data())
+
+
+@ui.page("/report")
+def report_page() -> None:
+    """성과 보고서 + 고급 분석 통합 페이지 (완전 병합 Stage A).
+
+    같은 당근 데이터로 [성과 요약 | 세그먼트 심화] 두 탭을 한 화면에서 본다.
+    /analysis 단독 라우트는 이 페이지로 리다이렉트된다.
+    """
+    create_nav("/report")
+    from app.pages.analysis import render_analysis_body
+    with ui.tabs().classes("w-full dg-tabs").props("align=left active-color=primary indicator-color=primary") as _tabs:
+        _t_perf = ui.tab("성과 요약")
+        _t_seg = ui.tab("세그먼트 심화")
+    with ui.tab_panels(_tabs, value=_t_perf).classes("w-full"):
+        with ui.tab_panel(_t_perf).classes("p-0"):
+            render_report_body()
+        with ui.tab_panel(_t_seg).classes("p-0"):
+            render_analysis_body()

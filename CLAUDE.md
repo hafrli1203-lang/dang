@@ -103,13 +103,13 @@ STORAGE_SECRET=...
 ## Tests
 ```bash
 python -m pytest app/ -q --tb=short
-# 152 tests pass (19s)
+# 374 tests pass (19s)
 ```
 
 ## Critical Rules
 
 ### Regression Prevention [ABSOLUTE]
-- 수정 시 기존 152개 테스트 **전부 통과** 유지
+- 수정 시 기존 374개 테스트 **전부 통과** 유지
 - 기존에 잘 되는 기능을 망치는 코딩 **절대 금지**
 - 매 작업 후 `python -m pytest app/ -q --tb=short` 실행하여 확인
 
@@ -164,3 +164,29 @@ python -m pytest app/ -q --tb=short
 
 ## Version
 - Current: v1.2.0 (main.py `__version__`)
+
+## 워크스페이스 운영구조 연결 (2026-06-18 추가)
+
+> 위의 기존 규칙(NiceGUI/CLI 우선 AI, SQLite, 374개 테스트 회귀 방지, asyncio.ensure_future 금지, bot_created_rule 5단계, dg- 클래스, 7섹션 품질 기준 등)은 **그대로 최우선 적용**한다. 아래는 충돌 없이 추가되는 워크스페이스 공통 운영 절차다.
+
+- 작업 전 `AGENTS.md`와 `docs/ai/` 문서(특히 PROJECT_BRIEF, RULES, WORKFLOW, TASKS)를 먼저 읽는다.
+- TASK는 하나씩만 처리한다. 첫 세션은 구조 파악/문서 중심.
+- 테스트(`python -m pytest app/ -q --tb=short`, 374개 통과) 없이 완료라고 말하지 않는다.
+- 민감정보(`.env`, API 키, 고객·광고계정·매장 개인정보)를 읽거나 출력하지 않는다(보이면 마스킹).
+- 기존 기능/페이지/테스트를 삭제하지 않는다. 대량 리팩토링·임의 디자인 결정 금지.
+- 광고/마케팅 SaaS이므로 **실행 가능한 광고안과 보고서 산출물(기획서·성과보고서·제안서)의 품질·정확성**을 최우선으로 본다.
+- UI 작업이면 한 화면(페이지)씩 분석→수정→검수(렌더 확인)→기록한다.
+- 작업 후 `docs/ai/TASKS.md`, `ERROR_LOG.md`, `DECISIONS.md`, (UI면 `DESIGN_AUDIT.md`)를 갱신한다.
+- 워크스페이스 공통 규칙: `C:\project\_AGENCY_OS\MASTER_RULES.md`.
+
+
+<!-- ===== 하네스 레이어 연결 (2026-06-18 추가) ===== -->
+
+## 하네스 작업 지침
+
+- 작업 전 `docs/ai/HARNESS.md`, `QUALITY_GATES.md`, `METRICS.md`, `TRIGGERS.md`를 읽어라.
+- TASK 하나를 처리한 뒤 `harness-reviewer`와 `metrics-auditor` subagent로 검수해라.
+- UI 작업이면 `ux-harness-reviewer`도 사용해라.
+- P0/P1 실패는 반드시 수정해라(수정 루프).
+- 하네스 통과 전 "완료"라고 하지 마라. 측정 못 한 항목은 "미검증", 숫자로 못 가르는 판단은 "판단 필요"로 표시.
+- 결과는 `docs/ai/HARNESS_RESULTS.md`에 기록. PR 직전엔 `docs/ai/CODE_REVIEW.md` 기준 내부 리뷰 후 Codex 준비.

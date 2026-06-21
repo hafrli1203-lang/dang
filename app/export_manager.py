@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from app.paths import EXPORTS_DIR
+from app.paths import EXPORTS_DIR, sanitize_filename
 from app.native_dialogs import open_folder, ask_save_path, is_native_available
 from app.logger import get_logger
 
@@ -21,6 +21,7 @@ class ExportManager:
     @staticmethod
     def save_default(data: bytes, filename: str, *, dest_dir: "Path | None" = None) -> None:
         """기본 폴더 저장. native→파일+다이얼로그, browser→파일+ui.download()."""
+        filename = sanitize_filename(filename)
         target_dir = dest_dir if dest_dir is not None else EXPORTS_DIR
         saved = target_dir / filename
         try:
@@ -52,6 +53,7 @@ class ExportManager:
     @staticmethod
     async def save_as(data: bytes, filename: str) -> bool:
         """Save As 다이얼로그. native→SAVE_DIALOG, browser→ui.download(). 성공 시 True."""
+        filename = sanitize_filename(filename)
         path = await ask_save_path(filename)
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +75,7 @@ class ExportManager:
     @staticmethod
     async def save_as_multi(pairs: list[tuple[bytes, str]]) -> bool:
         """복수 파일 Save As."""
+        pairs = [(data, sanitize_filename(filename)) for data, filename in pairs]
         if len(pairs) == 1:
             return await ExportManager.save_as(pairs[0][0], pairs[0][1])
 

@@ -82,6 +82,27 @@ async def generate_full_plan(
     budget_ctx = _budget_context(project)
     loop = asyncio.get_running_loop()
 
+    # 실제 경쟁 광고 관측(best-effort) — 전략·소식글에 레퍼런스로 주입
+    _emit_pre = on_progress
+    if _emit_pre:
+        _emit_pre("경쟁 광고를 살펴보는 중...")
+    try:
+        from app.research.competitor import competitor_context
+        competitor_ads = await loop.run_in_executor(None, lambda: competitor_context(project))
+    except Exception:
+        _log.exception("경쟁 광고 컨텍스트 실패(본 기획은 정상)")
+        competitor_ads = ""
+
+    # 커뮤니티 리서치 선행 결과(있으면) 주입 — 리서치를 먼저 했으면 기획이 그 목소리를 반영
+    try:
+        from app.research.saved_research import research_context
+        research_block = research_context(project_id)
+    except Exception:
+        _log.exception("리서치 컨텍스트 실패(본 기획은 정상)")
+        research_block = ""
+    if research_block and _emit_pre:
+        _emit_pre("커뮤니티 리서치 인사이트를 기획에 반영하는 중...")
+
     def _emit(msg: str) -> None:
         if on_progress:
             on_progress(msg)
@@ -116,7 +137,8 @@ async def generate_full_plan(
 
     # 1) 전략 분석 — 기획(조율)
     _emit("1/4 전략 분석 (Claude+GPT 조율)" if plan_engine == "coordinate" else "1/4 전략 분석")
-    g, p = build_strategy_prompt(project, wiki=wiki)
+    g, p = build_strategy_prompt(project, wiki=wiki, competitor_ads=competitor_ads,
+                                 research_block=research_block, budget_plan_context=budget_ctx)
     strategy = await _run(g, p, plan_engine, "전략 분석", "strategy")
     save_generated_content(project_id, plan_engine, strategy, content_type="strategy")
 
@@ -124,6 +146,7 @@ async def generate_full_plan(
     _emit("2/4 소식글·제목·쿠폰 (Claude)")
     g, p = build_planning_prompt(
         project, category="default", engine=COPY_ENGINE, strategy_context=strategy, wiki=wiki,
+        competitor_ads=competitor_ads, research_block=research_block,
     )
     content = await _run(g, p, COPY_ENGINE, "콘텐츠 생성", None)
     save_generated_content(project_id, COPY_ENGINE, content, content_type="content")

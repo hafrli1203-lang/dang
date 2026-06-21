@@ -31,18 +31,14 @@ async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
 
 
 NAV_SECTIONS = [
-    ("제작", [
+    ("기획", [
         ("folder_open", "프로젝트 관리", "/"),
         ("travel_explore", "커뮤니티 리서치", "/research"),
-        ("analytics", "전략 분석", "/plan/strategy"),
-        ("article", "소식글·제목·쿠폰", "/plan/content"),
-        ("tune", "광고 세팅", "/plan/adset"),
-        ("description", "운영 제안서", "/plan/proposal"),
+        ("edit_note", "광고 기획", "/plan/strategy"),
         ("image", "썸네일 제작", "/thumbnail"),
     ]),
     ("분석", [
-        ("assessment", "성과 보고서", "/report"),
-        ("insights", "고급 분석", "/analysis"),
+        ("assessment", "성과 분석", "/report"),
     ]),
 ]
 
@@ -50,22 +46,35 @@ NAV_SECTIONS = [
 NAV_PAGES = [item for _, items in NAV_SECTIONS for item in items]
 
 # 워크플로우 단계 — 기능을 '따로 노는 메뉴'가 아니라 하나의 여정으로 잇는다.
-# (한전ON·쿠팡검증식 가로 스텝 네비게이션. 모든 페이지 상단에 공통 표시.)
+# 리서치를 기획 '앞'에 두어 선행 단계임을 명확히 하고(리서치 결과가 기획에 주입됨),
+# 기획 4단계(전략·소식글·세팅·제안서)는 '광고 기획' 한 단계로 묶는다(단계 과다 해소).
+# 묶인 4단계의 내부 이동은 기획 위자드 자체 네비가 담당한다.
 # (아이콘, 단계명, 부제, 경로)
 WORKFLOW_STEPS = [
     ("storefront", "매장·캠페인", "작업 대상 선택", "/"),
-    ("travel_explore", "커뮤니티 리서치", "고객 반응·표현 수집", "/research"),
-    ("analytics", "전략 분석", "타겟·경쟁·방향", "/plan/strategy"),
-    ("article", "소식글·제목·쿠폰", "콘텐츠 생성", "/plan/content"),
-    ("tune", "광고 세팅", "캠페인·예산·소재", "/plan/adset"),
-    ("description", "운영 제안서", "종합 제안", "/plan/proposal"),
+    ("travel_explore", "커뮤니티 리서치", "고객 목소리 (기획 전 선행)", "/research"),
+    ("edit_note", "광고 기획", "전략·소식글·세팅·제안서 한 번에", "/plan/strategy"),
     ("image", "썸네일 제작", "광고 이미지", "/thumbnail"),
-    ("assessment", "성과 보고서", "결과 측정", "/report"),
-    ("insights", "고급 분석", "심화 진단", "/analysis"),
+    ("assessment", "성과 분석", "성과 측정 + 세그먼트 진단", "/report"),
 ]
+# 기획 위자드의 4개 하위 경로는 모두 '광고 기획' 단계로 본다(워크플로우 바 하이라이트·다음단계 유지).
+_PLAN_SUBROUTES = ("/plan/strategy", "/plan/content", "/plan/adset", "/plan/proposal")
 _STEP_INDEX = {path: i for i, (_ic, _nm, _sub, path) in enumerate(WORKFLOW_STEPS)}
+_PLAN_STEP_IDX = _STEP_INDEX.get("/plan/strategy", -1)
+for _r in _PLAN_SUBROUTES:
+    _STEP_INDEX.setdefault(_r, _PLAN_STEP_IDX)
+# 고급분석은 성과분석(/report)에 병합됨 → 같은 단계로 본다(리다이렉트·탭 내부 네비 일관).
+_STEP_INDEX.setdefault("/analysis", _STEP_INDEX.get("/report", -1))
 
+# 브레드크럼 제목 — 사이드바에서 묶인 기획 하위 경로까지 포함해 유지.
 _PAGE_TITLES = {path: name for _, items in NAV_SECTIONS for _icon, name, path in items}
+_PAGE_TITLES.update({
+    "/plan/strategy": "전략 분석",
+    "/plan/content": "소식글·제목·쿠폰",
+    "/plan/adset": "광고 세팅",
+    "/plan/proposal": "운영 제안서",
+    "/analysis": "성과 분석",
+})
 
 
 def _render_context_switcher() -> None:
@@ -129,8 +138,9 @@ def _render_context_switcher() -> None:
 def _render_workflow_steps(current: str) -> None:
     """한전ON·쿠팡검증식 가로 워크플로우 스텝 바.
 
-    기능을 따로 노는 메뉴가 아니라 ①매장 → ②기획 → ③리서치 → ④썸네일 →
-    ⑤성과 → ⑥분석으로 잇는다. 현재 단계는 강조, 지나온 단계는 완료(체크) 표시,
+    기능을 따로 노는 메뉴가 아니라 ①매장 → ②리서치 → ③기획 → ④썸네일 →
+    ⑤성과 → ⑥분석으로 잇는다(리서치가 기획보다 먼저). 현재 단계는 강조,
+    지나온 단계는 완료(체크) 표시,
     각 스텝 클릭 시 해당 페이지로 이동. 모든 페이지 상단에 공통으로 표시된다.
     """
     cur_idx = _STEP_INDEX.get(current, -1)

@@ -48,6 +48,41 @@ from app.logger import get_logger
 
 _log = get_logger("planning_wizard")
 
+
+def _research_block(pid) -> str:
+    """저장된 커뮤니티 리서치 인사이트 주입 블록(있으면). 실패해도 기획은 정상."""
+    if not pid:
+        return ""
+    try:
+        from app.research.saved_research import research_context
+        return research_context(pid)
+    except Exception:
+        _log.exception("리서치 컨텍스트 로드 실패(기획은 정상)")
+        return ""
+
+
+def _budget_block(project) -> str:
+    """예산 룰엔진(budget_planner) 계산값 — 전략의 '예산에 따른 시나리오'를 근거시킨다."""
+    if not project:
+        return ""
+    try:
+        from app.engine.budget_planner import recommend_structure, plan_to_prompt_context
+        import re as _re
+        raw = str(project.get("daily_budget") or "")
+        digits = _re.sub(r"[^\d]", "", raw)
+        daily = int(digits) if digits else 0
+        if not daily:
+            b = str(project.get("budget") or "")
+            m = _re.search(r"(\d[\d,]*)\s*만", b)
+            daily = (int(m.group(1).replace(",", "")) * 10_000 // 30) if m else 10_000
+        region = (project.get("region") or "우리동네").split()[-1]
+        gender = (project.get("target_gender") or "여성").strip() or "여성"
+        return plan_to_prompt_context(recommend_structure(max(daily, 1), region=region, gender=gender))
+    except Exception:
+        _log.exception("예산 컨텍스트 계산 실패(전략은 정상)")
+        return ""
+
+
 _STEP_LABELS = ["전략 분석", "콘텐츠 생성", "광고 세팅", "운영 제안서"]
 _STEP_ICONS = ["analytics", "edit_note", "ads_click", "description"]
 _MAX_ENABLED_STEP = 4
@@ -409,6 +444,19 @@ def build_wizard_ui(
                         ).classes("dg-hint").style("text-align: center")
                         full_spinner = ui.spinner(size="24px").classes("hidden")
                         full_status = ui.label("").classes("dg-progress-text hidden")
+
+                        def _full_time_hint() -> str:
+                            # 4단계 풀 생성 실측: Claude/GPT 단독 ~8분, 조율 ~16~18분
+                            if engine_radio.value == "coordinate":
+                                return "예상 소요 약 16~18분 (Claude+GPT 조율). 창을 닫지 말고 기다려 주세요."
+                            return "예상 소요 약 8분. 창을 닫지 말고 기다려 주세요."
+
+                        full_time = ui.label(_full_time_hint()).classes(
+                            "dg-hint"
+                        ).style("text-align: center")
+                        engine_radio.on_value_change(
+                            lambda: full_time.set_text(_full_time_hint())
+                        )
                     _wizard_state["_full_btn"] = full_btn
                     _wizard_state["_full_spinner"] = full_spinner
                     _wizard_state["_full_status"] = full_status
@@ -702,6 +750,8 @@ def build_wizard_ui(
             guide, prompt = build_strategy_prompt(
                 project, current_ad=_collect_current_ad(),
                 wiki=store_wiki.wiki_context(pid, project),
+                research_block=_research_block(pid),
+                budget_plan_context=_budget_block(project),
             )
             loop = asyncio.get_running_loop()
             if engine == "coordinate":
@@ -771,6 +821,8 @@ def build_wizard_ui(
             guide, prompt = build_strategy_prompt(
                 project, current_ad=_collect_current_ad(),
                 wiki=store_wiki.wiki_context(pid, project),
+                research_block=_research_block(pid),
+                budget_plan_context=_budget_block(project),
             )
             if feedback.strip():
                 prompt += f"\n\n[수정 요청]\n{feedback.strip()}"
@@ -1068,6 +1120,7 @@ def build_wizard_ui(
                         ui.label(f"{len(data):,} bytes").classes("dg-label-sm")
                     thumb_ref_clear_btn.classes(remove="hidden")
                 except Exception as exc:
+                    _log.exception("참고 이미지 읽기 실패: %s", exc)
                     ui.notify(f"이미지를 읽지 못했어요. 파일을 확인하고 다시 올려 주세요. ({exc})", type="negative")
 
             def _clear_thumb_ref() -> None:
@@ -1134,6 +1187,7 @@ def build_wizard_ui(
                     from app.ai.image_provider import get_image_failure_guide
                     ui.notify(get_image_failure_guide(str(ve)), type="info", timeout=15000, close_button="확인")
                 except Exception as exc:
+                    _log.exception("썸네일 생성 실패: %s", exc)
                     thumb_status.set_text("썸네일을 만들지 못했어요")
                     ui.notify(f"썸네일을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
                     from app.ai.image_provider import get_image_failure_guide
@@ -1563,6 +1617,7 @@ def build_wizard_ui(
                 except ValueError as ve:
                     ui.notify(str(ve), type="warning")
                 except Exception as exc:
+                    _log.exception("파일 내보내기 실패: %s", exc)
                     download_status.set_text("내보내지 못했어요")
                     ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
@@ -1605,6 +1660,7 @@ def build_wizard_ui(
                 except ValueError as ve:
                     ui.notify(str(ve), type="warning")
                 except Exception as exc:
+                    _log.exception("파일 내보내기 실패: %s", exc)
                     download_status.set_text("내보내지 못했어요")
                     ui.notify(f"파일을 내보내지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative")
 
@@ -1772,6 +1828,7 @@ def build_wizard_ui(
                     target_cpa=target_cpa,
                 )
             except Exception as exc:
+                _log.exception("예산 설계 계산 실패: %s", exc)
                 ui.notify(f"설계를 계산하지 못했어요. 입력값을 확인해 주세요. ({exc})", type="negative")
                 return
 

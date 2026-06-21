@@ -49,11 +49,14 @@ def build(onefile: bool = False, clean: bool = False) -> None:
     cmd.extend(["--add-data", f"{ROOT / 'templates'}{os.pathsep}templates"])
     # .env.example (사용자가 .env로 복사)
     cmd.extend(["--add-data", f"{ROOT / '.env.example'}{os.pathsep}."])
+    # 교재 지식(정제본 + 운영 플레이북 + raw 원문) — domain_knowledge가 frozen에서도 읽도록
+    cmd.extend(["--add-data", f"{ROOT / 'app' / 'knowledge'}{os.pathsep}app/knowledge"])
 
     # ── Collect packages with data files ────────────────────────────────
     cmd.extend(["--collect-all", "nicegui"])
     cmd.extend(["--collect-data", "matplotlib"])
     cmd.extend(["--collect-data", "docx"])
+    cmd.extend(["--collect-data", "pptx"])
 
     # ── Hidden imports ──────────────────────────────────────────────────
     hidden = [
@@ -61,6 +64,7 @@ def build(onefile: bool = False, clean: bool = False) -> None:
         "openai",
         "openpyxl",
         "dotenv",
+        "pptx",
         "platformdirs",
         "app.paths",
         "app.pages.project",
@@ -68,6 +72,8 @@ def build(onefile: bool = False, clean: bool = False) -> None:
         "app.pages.report",
         "app.ai.providers",
         "app.reporting.docx_report",
+        "app.reporting.slides_html",
+        "app.reporting.slides_pptx",
     ]
     for h in hidden:
         cmd.extend(["--hidden-import", h])

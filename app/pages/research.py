@@ -249,6 +249,12 @@ def research_page() -> None:
                 results_card.classes(remove="hidden")
                 if run.documents:
                     ui.notify("리서치 완료!", type="positive")
+                    # 선택된 매장이 있으면 인사이트를 저장 → 기획(전략·소식글)이 자동 반영
+                    pid = nicegui_app.storage.user.get("current_project_id")
+                    if pid and getattr(run, "insight", None):
+                        from app.research.saved_research import save_research_insight
+                        if save_research_insight(pid, run.insight, run.keyword):
+                            ui.notify("이 리서치를 기획에 자동 반영할게요.", type="info")
                 else:
                     ui.notify("수집된 본문이 없어요. 소스나 키워드를 바꿔 보세요.", type="warning")
             except Exception:  # noqa: BLE001

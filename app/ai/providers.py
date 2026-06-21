@@ -404,8 +404,14 @@ class ClaudeCliProvider(BaseProvider):
         args: list[str] = [self._cli_path, "--print"]
         if self._model:
             args += ["--model", self._model]
+        # 시스템 프롬프트 전달: 작으면 --append-system-prompt 인자로, 크면 stdin에 합쳐 넘긴다.
+        # (Windows 명령줄 길이 한계 ~32KB — 교재 지식 등 큰 시스템 프롬프트는 인자로 못 넘김. WinError 206 회피)
+        stdin_payload = prompt
         if system_prompt:
-            args += ["--append-system-prompt", system_prompt]
+            if len(system_prompt) > 6000:
+                stdin_payload = f"{system_prompt}\n\n━━━━━━ [작업 요청] ━━━━━━\n{prompt}"
+            else:
+                args += ["--append-system-prompt", system_prompt]
 
         env = self._build_env()
 
@@ -413,7 +419,7 @@ class ClaudeCliProvider(BaseProvider):
         try:
             result = subprocess.run(
                 args,
-                input=prompt,
+                input=stdin_payload,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -502,7 +508,14 @@ class ClaudeCliProvider(BaseProvider):
         if self._model:
             args += ["--model", self._model]
         if system_prompt:
-            args += ["--append-system-prompt", system_prompt]
+            # 큰 시스템 프롬프트는 명령줄 인자로 못 넘김(Windows ~32KB 한계) → stdin JSON text에 합쳐 재구성.
+            if len(system_prompt) > 6000:
+                msg["message"]["content"][-1]["text"] = (
+                    f"{system_prompt}\n\n━━━━━━ [작업 요청] ━━━━━━\n{prompt}"
+                )
+                stdin_text = json.dumps(msg, ensure_ascii=False) + "\n"
+            else:
+                args += ["--append-system-prompt", system_prompt]
 
         env = self._build_env()
 

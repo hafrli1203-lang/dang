@@ -19,8 +19,7 @@ from nicegui import ui, app as nicegui_app
 
 from app.common import create_nav, next_step_bar
 from app.database import get_project, get_projects
-from app.export_manager import ExportManager
-from app.paths import CHARTS_DIR, EXPORTS_DIR
+from app.paths import EXPORTS_DIR
 from app.reporting.demographic import (
     analyze_segments,
     build_priority_checklist,
@@ -40,7 +39,6 @@ from app.engine.revision_table import (
     revision_rows_for_table,
     revision_table_markdown,
 )
-from app.reporting.analysis_docx import build_analysis_docx
 from app.ai_engine import (
     SYSTEM_GUIDE_ANALYSIS,
     build_analysis_prompt,
@@ -239,10 +237,8 @@ def _create_sample_xlsx() -> None:
 
 # ───────────────────────── page ─────────────────────────
 
-@ui.page("/analysis")
-def analysis_page() -> None:
-    create_nav("/analysis")
-
+def render_analysis_body() -> None:
+    """고급 분석 본문(create_nav 제외). /report 병합 페이지의 '세그먼트 심화' 탭에서 재사용."""
     state: dict = {
         "parsed": None,        # {"genders","ages","campaigns"}
         "judgments": None,
@@ -409,15 +405,13 @@ def analysis_page() -> None:
             section_header("summarize", "3단계: 분석 결과",
                            "현황 → 개선점 → 실행 계획 → 광고주 보고서")
             results_body = ui.column().classes("w-full gap-4")
-            with ui.row().classes("gap-3 mt-3"):
-                dl_default_btn = ui.button(
-                    "보고서 DOCX 저장 (기본 폴더)", icon="save",
-                    on_click=lambda: _export_docx(saveas=False),
-                ).classes("dg-btn-success")
-                dl_saveas_btn = ui.button(
-                    "다른 위치로 저장...", icon="save_as",
-                    on_click=lambda: _export_docx(saveas=True),
-                ).classes("dg-btn-secondary")
+            # 광고주 전달용 산출물은 '성과 요약' 탭의 통합 내보내기(슬라이드)로 일원화한다.
+            with ui.element("div").classes("dg-banner dg-banner-info w-full mt-3"):
+                ui.icon("slideshow", size="18px")
+                ui.label(
+                    "광고주 전달용 보고서는 '성과 요약' 탭의 [내보내기]에서 슬라이드(PPT·HTML)로 받으세요. "
+                    "여기 세그먼트 판정이 함께 담깁니다."
+                )
 
         # ───────── handlers ─────────
 
@@ -1208,49 +1202,7 @@ def analysis_page() -> None:
             groups_container = ui.column().classes("w-full gap-2")
             _refresh()
 
-        async def _export_docx(*, saveas: bool) -> None:
-            if not state.get("ai_sections"):
-                ui.notify("[분석 실행]을 먼저 눌러 주세요.", type="warning")
-                return
-            try:
-                pid = project_sel.value
-                project = get_project(pid) if pid else {}
-                project = project or {}
-                project_meta = _build_project_meta(project, state)
-                economics = state.get("economics")
-                funnel = state.get("funnel")
-                parsed = state["parsed"]
-                loop = asyncio.get_running_loop()
-                import tempfile
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp = Path(tmpdir)
-                    out = await loop.run_in_executor(
-                        None,
-                        lambda: build_analysis_docx(
-                            project_meta=project_meta,
-                            ages=parsed["ages"], campaigns=parsed["campaigns"],
-                            judgments=state["judgments"], plan=state["plan"],
-                            priority=state["priority"],
-                            var_warnings=state["var_warnings"],
-                            pair_gaps=state["pair_gaps"],
-                            ai_sections=state["ai_sections"],
-                            output_path=tmp / "analysis.docx",
-                            chart_dir=CHARTS_DIR,
-                            funnel=funnel,
-                            economics=economics,
-                            metrics_available=state.get("metrics_available"),
-                        ),
-                    )
-                    data = out.read_bytes()
-
-                fname = f"고급분석_{project_meta['name']}.docx".replace("/", "_")
-                if saveas:
-                    ok = await ExportManager.save_as_multi([(data, fname)])
-                    if ok:
-                        ui.notify("저장했어요.", type="positive")
-                else:
-                    ExportManager.save_default(data, filename=fname)
-                    ui.notify(f"{fname} 다운로드를 시작했어요.", type="positive", timeout=6000)
-            except Exception as exc:  # noqa: BLE001
-                _log.exception("DOCX export failed")
-                ui.notify(f"보고서를 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
+@ui.page("/analysis")
+def analysis_page() -> None:
+    """병합 후 단독 라우트는 통합 /report 로 이동(하위 호환·기존 링크 유지)."""
+    ui.navigate.to("/report")

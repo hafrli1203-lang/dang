@@ -59,6 +59,8 @@ _AD_RECORD_COLUMNS = [
     "daily_budget",      # 일일 예산
     "ad_titles",         # 소재(광고) 제목들 — 줄바꿈 구분
     "coupon_info",       # 쿠폰 (이름/혜택/기간 자유 입력)
+    "unit_price",        # 후속 평균 객단가(원) — MAX CPA 계산용. 비면 [가정]으로 처리
+    "margin_pct",        # 마진율(%) — MAX CPA 계산용
 ]
 
 # save/update 시 호출자가 일부 필드를 안 넘겨도 안전하도록 기본값 (name만 필수).
@@ -168,9 +170,11 @@ def save_project(data: dict) -> int:
         cur = conn.execute(
             """INSERT INTO projects
                (name, campaign_name, industry, region, goal, budget, period, benefits, reference_url,
-                target_radius_km, target_gender, target_age, bid_type, daily_budget, ad_titles, coupon_info)
+                target_radius_km, target_gender, target_age, bid_type, daily_budget, ad_titles, coupon_info,
+                unit_price, margin_pct)
                VALUES (:name,:campaign_name,:industry,:region,:goal,:budget,:period,:benefits,:reference_url,
-                :target_radius_km,:target_gender,:target_age,:bid_type,:daily_budget,:ad_titles,:coupon_info)""",
+                :target_radius_km,:target_gender,:target_age,:bid_type,:daily_budget,:ad_titles,:coupon_info,
+                :unit_price,:margin_pct)""",
             {**_PROJECT_DEFAULTS, **data},
         )
         return cur.lastrowid
@@ -185,7 +189,8 @@ def update_project(project_id: int, data: dict) -> None:
                reference_url=:reference_url,
                target_radius_km=:target_radius_km, target_gender=:target_gender,
                target_age=:target_age, bid_type=:bid_type, daily_budget=:daily_budget,
-               ad_titles=:ad_titles, coupon_info=:coupon_info WHERE id=:id""",
+               ad_titles=:ad_titles, coupon_info=:coupon_info,
+               unit_price=:unit_price, margin_pct=:margin_pct WHERE id=:id""",
             {**_PROJECT_DEFAULTS, **data, "id": project_id},
         )
 

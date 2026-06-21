@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 pydantic>=2.0.0
 openpyxl>=3.1.0
 python-docx>=1.1.0
+python-pptx>=1.0.0
 matplotlib>=3.8.0
 Pillow>=10.0.0
 # 커뮤니티 리서치 (검색 → 본문/댓글 수집 → AI 분석)
