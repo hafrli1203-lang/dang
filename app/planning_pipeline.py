@@ -93,15 +93,18 @@ async def generate_full_plan(
         _log.exception("경쟁 광고 컨텍스트 실패(본 기획은 정상)")
         competitor_ads = ""
 
-    # 커뮤니티 리서치 선행 결과(있으면) 주입 — 리서치를 먼저 했으면 기획이 그 목소리를 반영
+    # 커뮤니티 리서치는 /research에서 '소재 키워드로' 명시적으로 선행한다(단일 진입점).
+    # 여기선 저장된 결과만 반영(없으면 빈 블록) — 업종 키워드로 몰래 자동 리서치 하지 않는다.
     try:
         from app.research.saved_research import research_context
         research_block = research_context(project_id)
     except Exception:
-        _log.exception("리서치 컨텍스트 실패(본 기획은 정상)")
+        _log.exception("리서치 컨텍스트 로드 실패(본 기획은 정상)")
         research_block = ""
     if research_block and _emit_pre:
         _emit_pre("커뮤니티 리서치 인사이트를 기획에 반영하는 중...")
+    elif not research_block and _emit_pre:
+        _emit_pre("저장된 리서치 없음 — /research에서 먼저 돌리면 반영돼요(이번 기획은 리서치 없이 진행)")
 
     def _emit(msg: str) -> None:
         if on_progress:

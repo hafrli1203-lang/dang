@@ -50,6 +50,56 @@ class TestNaverConnector(unittest.TestCase):
         with self.assertRaises(C.ResearchKeyMissing):
             C.discover_naver("kw", "nv_blog", "blog", 5, http_get_json=lambda *a, **k: {})
 
+    def test_period_filter_stops_at_old_blog(self):
+        # blog postdate(YYYYMMDD) 기준: 컷오프보다 오래된 글을 만나면 최신순이라 그 뒤는 모두 제외.
+        from datetime import date, timedelta
+        recent = date.today().strftime("%Y%m%d")
+        old = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
+
+        def fake(url, headers=None, timeout=10):
+            return {"items": [
+                {"title": "최신1", "link": "http://x/1", "description": "d", "postdate": recent},
+                {"title": "최신2", "link": "http://x/2", "description": "d", "postdate": recent},
+                {"title": "옛글", "link": "http://x/3", "description": "d", "postdate": old},
+            ]}
+        out = C.discover_naver("kw", "nv_blog", "blog", 10, 3, http_get_json=fake)
+        self.assertEqual(len(out), 2)
+        self.assertNotIn("옛글", [o.title for o in out])
+
+    def test_period_filter_date_sort_stops(self):
+        # sort='date'(최신순)면 오래된 글에서 조기 중단(이후는 모두 더 오래됨).
+        from datetime import date, timedelta
+        recent = date.today().strftime("%Y%m%d")
+        old = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
+
+        def fake(url, headers=None, timeout=10):
+            self.assertIn("sort=date", url)
+            return {"items": [
+                {"title": "최신", "link": "http://x/1", "description": "d", "postdate": recent},
+                {"title": "옛글", "link": "http://x/2", "description": "d", "postdate": old},
+            ]}
+        out = C.discover_naver("kw", "nv_blog", "blog", 10, 3, sort="date", http_get_json=fake)
+        self.assertEqual([o.title for o in out], ["최신"])
+
+    def test_no_period_keeps_old(self):
+        # 기간 무관(None)이면 오래된 글도 포함.
+        def fake(url, headers=None, timeout=10):
+            return {"items": [
+                {"title": "옛글", "link": "http://x/1", "description": "d", "postdate": "20200101"},
+            ]}
+        out = C.discover_naver("kw", "nv_blog", "blog", 5, None, http_get_json=fake)
+        self.assertEqual(len(out), 1)
+
+    def test_dateless_type_not_filtered(self):
+        # kin은 작성일을 안 줘서 필터 불가 → 기간이 있어도 건수대로 동작(정직).
+        def fake(url, headers=None, timeout=10):
+            return {"items": [
+                {"title": "a", "link": "http://x/1", "description": "d"},
+                {"title": "b", "link": "http://x/2", "description": "d"},
+            ]}
+        out = C.discover_naver("kw", "nv_kin", "kin", 5, 3, http_get_json=fake)
+        self.assertEqual(len(out), 2)
+
 
 class TestGoogleCse(unittest.TestCase):
     def test_site_query_and_parse(self):
@@ -68,6 +118,23 @@ class TestGoogleCse(unittest.TestCase):
             os.environ.pop("GOOGLE_CSE_CX", None)
         self.assertIn("site%3Atheqoo.net", captured["url"])  # site: url-encoded
         self.assertEqual(out[0].url, "http://t/1")
+
+    def test_period_months_sets_date_restrict(self):
+        import os
+        os.environ["GOOGLE_CSE_API_KEY"] = "k"
+        os.environ["GOOGLE_CSE_CX"] = "cx"
+        captured = {}
+
+        def fake(url, headers=None, timeout=10):
+            captured["url"] = url
+            return {"items": [{"title": "T", "link": "http://t/1", "snippet": "s"}]}
+        try:
+            C.discover_google_cse("렌즈", "theqoo", "theqoo.net", 3,
+                                  period_months=6, http_get_json=fake)
+        finally:
+            os.environ.pop("GOOGLE_CSE_API_KEY", None)
+            os.environ.pop("GOOGLE_CSE_CX", None)
+        self.assertIn("dateRestrict=m6", captured["url"])
 
 
 class TestFetchHelpers(unittest.TestCase):
@@ -150,7 +217,7 @@ class TestPipeline(unittest.TestCase):
         # 두 소스가 같은 URL을 반환해도 1개로 dedup
         orig = C.discover_naver
 
-        def fake_discover_naver(kw, sid, t, lim, http_get_json=None):
+        def fake_discover_naver(kw, sid, t, lim, period_months=None, sort="sim", http_get_json=None):
             return [C.DiscoveryResult("t", "http://dup/1", "s", 1, sid)]
         C.discover_naver = fake_discover_naver
         try:
@@ -160,6 +227,56 @@ class TestPipeline(unittest.TestCase):
             os.environ.pop("NAVER_CLIENT_ID", None)
             os.environ.pop("NAVER_CLIENT_SECRET", None)
         self.assertEqual(len(results), 1)
+
+    def test_discover_threads_period_months(self):
+        import os
+        os.environ["NAVER_CLIENT_ID"] = "c"
+        os.environ["NAVER_CLIENT_SECRET"] = "s"
+        captured = {}
+        orig = C.discover_naver
+
+        def fake_discover_naver(kw, sid, t, lim, period_months=None, sort="sim", http_get_json=None):
+            captured["period"] = period_months
+            captured["sort"] = sort
+            return []
+        C.discover_naver = fake_discover_naver
+        try:
+            P.discover("kw", ["nv_blog"], 5, 3)
+        finally:
+            C.discover_naver = orig
+            os.environ.pop("NAVER_CLIENT_ID", None)
+            os.environ.pop("NAVER_CLIENT_SECRET", None)
+        self.assertEqual(captured["period"], 3)
+        self.assertEqual(captured["sort"], "sim")  # 리서치 기본은 정확도순
+
+    def test_run_research_multi_keyword_dedup(self):
+        # 여러 키워드(중첩): 각각 검색해 합치고 URL 중복은 제거.
+        import os
+        os.environ["NAVER_CLIENT_ID"] = "c"
+        os.environ["NAVER_CLIENT_SECRET"] = "s"
+        calls = []
+        orig = C.discover_naver
+
+        def fake_discover_naver(kw, sid, t, lim, period_months=None, sort="sim", http_get_json=None):
+            calls.append(kw)
+            # kw별로 1개 고유 + 1개 공통(중복) URL
+            return [
+                C.DiscoveryResult(kw, f"http://x/{kw}", "s", 1, sid),
+                C.DiscoveryResult("dup", "http://x/dup", "s", 2, sid),
+            ]
+        C.discover_naver = fake_discover_naver
+        try:
+            results, _ = (None, None)
+            run = P.run_research(["변색렌즈", "다초점렌즈"], ["nv_blog"],
+                                 lambda *a, **k: '{"verdict":"v"}', max_docs=0)
+        finally:
+            C.discover_naver = orig
+            os.environ.pop("NAVER_CLIENT_ID", None)
+            os.environ.pop("NAVER_CLIENT_SECRET", None)
+        self.assertEqual(calls, ["변색렌즈", "다초점렌즈"])  # 키워드별로 따로 검색
+        # 고유 2개 + 공통 1개(중복제거) = 3
+        self.assertEqual(run.discovered, 3)
+        self.assertEqual(run.keyword, "변색렌즈, 다초점렌즈")
 
     def test_discover_records_key_missing(self):
         # 키 없으면 해당 소스 label이 key_missing에 기록되고 결과는 빔

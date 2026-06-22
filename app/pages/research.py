@@ -56,28 +56,45 @@ def research_page() -> None:
         with ui.card().classes("dg-card w-full"):
             section_header("search", "검색 키워드", "업종·상품·지역을 조합하면 더 구체적인 반응을 찾아요.")
 
-            # 프로젝트에서 업종/지역 프리필
+            # 프로젝트 소재(혜택/광고제목)에서 키워드 후보 프리필 — 지역·업종 단독은 노이즈라 제외.
             pid = nicegui_app.storage.user.get("current_project_id")
             project = get_project(pid) if pid else None
             prefill = ""
-            if project:
-                parts = [project.get("industry", ""), project.get("region", "")]
-                prefill = " ".join(p for p in parts if p).strip()
+            # AI 상담(/briefing)에서 넘어온 키워드가 있으면 그걸 우선 채운다(한 번 쓰고 비움).
+            briefing_kws = nicegui_app.storage.user.get("briefing_keywords") or None
+            if briefing_kws:
+                nicegui_app.storage.user["briefing_keywords"] = None
+                prefill = "\n".join(briefing_kws)
+            elif project:
+                from app.research.saved_research import suggest_keywords
+                prefill = "\n".join(suggest_keywords(project))
 
-            keyword_input = ui.input(
-                label="키워드", value=prefill,
-                placeholder="예: 변색렌즈 후기 / 밀양 안경원 / 동네 마라탕",
-            ).classes("w-full dg-input").props("outlined")
+            keyword_input = ui.textarea(
+                label="키워드 (한 줄에 하나 — 소재/상품으로)", value=prefill,
+                placeholder="예:\n변색렌즈\n다초점렌즈\n안경 렌즈 추천",
+            ).classes("w-full dg-input").props("outlined autogrow")
+            ui.label(
+                "지역·업종(예: '공주 안경원')은 무관한 글만 잡혀요. 손님이 검색할 '소재/상품/고민'으로, "
+                "한 줄에 하나씩 넣으면 각각 따로 검색해 합쳐요(중첩). 정확도순(sim)으로 모읍니다."
+            ).classes("dg-label-sm")
 
             with ui.row().classes("gap-4 items-center mt-2 flex-wrap"):
-                depth_select = ui.select(
-                    {6: "빠르게 (소스당 6건)", 10: "보통 (10건)", 16: "깊게 (16건)"},
-                    value=10, label="검색 깊이",
-                ).classes("w-48 dg-select").props("outlined")
-                maxdocs_select = ui.select(
-                    {8: "본문 8개", 12: "본문 12개", 20: "본문 20개"},
-                    value=12, label="본문 분석 수",
+                period_select = ui.select(
+                    {1: "최근 1개월", 3: "최근 3개월", 6: "최근 6개월", 12: "최근 1년", 0: "기간 무관"},
+                    value=3, label="검색 기간",
                 ).classes("w-44 dg-select").props("outlined")
+                depth_select = ui.select(
+                    {30: "넓게 (소스당 30건)", 60: "보통 (60건)", 100: "최대 (100건)"},
+                    value=60, label="기간 내 최대 건수",
+                ).classes("w-52 dg-select").props("outlined")
+                maxdocs_select = ui.select(
+                    {12: "본문 12개", 20: "본문 20개", 30: "본문 30개"},
+                    value=20, label="본문 분석 수",
+                ).classes("w-44 dg-select").props("outlined")
+            ui.label(
+                "기간이 핵심이에요. 최근 N개월 글만 모아 분별력을 높이고, 건수는 그 기간 안에서의 "
+                "안전 상한이에요. (네이버 카페·지식인은 작성일을 안 줘서 최신순 상위로만 동작해요.)"
+            ).classes("dg-label-sm mt-1")
 
             # 소스 선택 (칩 토글)
             ui.label("검색할 소스").classes("dg-label-sm mt-3")
@@ -113,6 +130,36 @@ def research_page() -> None:
         with progress_row:
             ui.spinner("dots", size="sm")
             progress_label = ui.label("준비 중...").classes("dg-progress-text")
+
+        # -- 이 매장에 저장된 리서치 (페이지 진입 시 바로 표시 — 기획에 자동 반영되는 자료) --
+        saved_card = ui.card().classes("dg-card w-full hidden")
+        with saved_card:
+            section_header("history", "이 매장에 저장된 리서치",
+                           "기획·재생성에 자동 반영되는 자료예요. 새로 검색하면 갱신돼요.")
+            saved_body = ui.column().classes("w-full gap-2")
+
+        def _render_saved() -> None:
+            pid = nicegui_app.storage.user.get("current_project_id")
+            if not pid:
+                return
+            from app.research.saved_research import get_saved_research
+            row = get_saved_research(pid)
+            if not row:
+                return
+            saved_body.clear()
+            with saved_body:
+                created = str(row.get("created_at", ""))[:16]
+                if created:
+                    ui.label(f"수집 시각: {created}").classes("dg-label-sm")
+                ui.markdown(str(row.get("content", ""))).classes("w-full dg-prose")
+                # 이미 리서치된 매장은 재실행 없이 바로 기획으로(클릭 1번).
+                ui.button(
+                    "이 리서치로 광고 기획하기", icon="arrow_forward",
+                    on_click=lambda: ui.navigate.to("/plan/strategy"),
+                ).classes("dg-btn-primary w-full mt-2")
+            saved_card.classes(remove="hidden")
+
+        _render_saved()
 
         # -- 결과 --
         results_card = ui.card().classes("dg-card w-full hidden")
@@ -212,10 +259,17 @@ def research_page() -> None:
                                 ui.label(f"댓글 {d['comment_count']}").style(
                                     "font-size:11px; color: var(--dg-text-tertiary)")
 
+                # 바로 다음으로 — 뒤로 가지 않고 이 리서치로 기획 시작(클릭 1번).
+                ui.button(
+                    "이 리서치로 광고 기획하기", icon="arrow_forward",
+                    on_click=lambda: ui.navigate.to("/plan/strategy"),
+                ).classes("dg-btn-primary w-full mt-2")
+
         async def _run() -> None:
-            keyword = (keyword_input.value or "").strip()
-            if not keyword:
-                ui.notify("키워드를 입력해 주세요.", type="warning")
+            raw = (keyword_input.value or "").strip()
+            keywords = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            if not keywords:
+                ui.notify("키워드를 한 줄에 하나씩 입력해 주세요.", type="warning")
                 return
             if not state["selected"]:
                 ui.notify("소스를 하나 이상 선택해 주세요.", type="warning")
@@ -238,9 +292,10 @@ def research_page() -> None:
                 run = await loop.run_in_executor(
                     None,
                     lambda: run_research(
-                        keyword, list(state["selected"]), _gen,
+                        keywords, list(state["selected"]), _gen,
                         limit_per_source=int(depth_select.value),
                         max_docs=int(maxdocs_select.value),
+                        period_months=int(period_select.value) or None,
                         progress=_progress,
                     ),
                 )
@@ -255,6 +310,7 @@ def research_page() -> None:
                         from app.research.saved_research import save_research_insight
                         if save_research_insight(pid, run.insight, run.keyword):
                             ui.notify("이 리서치를 기획에 자동 반영할게요.", type="info")
+                            _render_saved()  # 저장된 리서치 카드 갱신
                 else:
                     ui.notify("수집된 본문이 없어요. 소스나 키워드를 바꿔 보세요.", type="warning")
             except Exception:  # noqa: BLE001
@@ -269,18 +325,26 @@ def research_page() -> None:
             ads_body.clear()
             engine_labels = {"GOOGLE": "구글 검색광고", "NAVER": "네이버", "META": "메타"}
             engine_colors = {"GOOGLE": "#4285F4", "NAVER": "#03C75A", "META": "#0866FF"}
+            # 엔진별 건수(구글 차단을 솔직히 보여주려고).
+            by_engine = {"GOOGLE": 0, "NAVER": 0, "META": 0}
+            for o in observations:
+                by_engine[o.engine] = by_engine.get(o.engine, 0) + 1
             with ads_body:
                 if not observations:
                     with ui.element("div").classes("dg-banner dg-banner-warning w-full"):
                         ui.icon("warning", size="18px")
                         ui.label(
-                            "관측된 광고가 없어요. 키워드에 광고가 안 붙었거나, 페이지 구조가 "
-                            "바뀌었거나, 봇 차단일 수 있어요. 키워드를 바꿔 보세요."
+                            "관측된 광고가 없어요. 키워드에 광고가 안 붙었거나, 봇 차단일 수 있어요. "
+                            "(구글은 자동화 차단이 강해 0건이 잦아요. 네이버·메타로 보세요.) 키워드를 바꿔 보세요."
                         )
                     return
                 with ui.element("div").classes("dg-banner dg-banner-success w-full"):
                     ui.icon("check_circle", size="18px")
-                    ui.label(f"경쟁 광고 {len(observations)}건 관측 — 점수 높은 순으로 정렬했어요.")
+                    ui.label(
+                        f"경쟁 광고 {len(observations)}건 — 네이버 {by_engine['NAVER']} · "
+                        f"메타 {by_engine['META']} · 구글 {by_engine['GOOGLE']}"
+                        + ("  (구글 0건 = 봇 차단, 정상)" if by_engine["GOOGLE"] == 0 else "")
+                    )
                 ordered = sorted(observations, key=lambda o: o.heuristic_score, reverse=True)
                 for ob in ordered:
                     color = engine_colors.get(ob.engine, "#888")
@@ -306,10 +370,18 @@ def research_page() -> None:
                                 "font-size:11px; color:" + color)
 
         async def _run_ads() -> None:
-            keyword = (keyword_input.value or "").strip()
-            if not keyword:
-                ui.notify("키워드를 입력해 주세요.", type="warning")
+            # 입력한 키워드 전부 × 3엔진(구글·네이버·메타) 관측. 폭주 방지용 상한 20개만 둔다.
+            raw = (keyword_input.value or "").strip()
+            all_kw = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            if not all_kw:
+                ui.notify("키워드를 한 줄 이상 입력해 주세요.", type="warning")
                 return
+            keywords = all_kw[:20]
+            est = max(1, round(len(keywords) * 0.5))  # 키워드당 ≈30초(3엔진)
+            note = f"키워드 {len(keywords)}개 전부 × 구글·네이버·메타 관측 중 — 약 {est}분 걸려요."
+            if len(all_kw) > len(keywords):
+                note += f" (안전 상한 {len(keywords)}개 적용, 전체 {len(all_kw)}개)"
+            ui.notify(note, type="info", timeout=8000)
             from app.research.stealth import playwright_available
             if not playwright_available():
                 ui.notify(
@@ -325,7 +397,7 @@ def research_page() -> None:
                 from app.research.pipeline import observe_ads
                 loop = asyncio.get_running_loop()
                 obs = await loop.run_in_executor(
-                    None, lambda: observe_ads(keyword, progress=lambda m: progress_label.set_text(m)),
+                    None, lambda: observe_ads(keywords, progress=lambda m: progress_label.set_text(m)),
                 )
                 _render_ads(obs)
                 ads_card.classes(remove="hidden")

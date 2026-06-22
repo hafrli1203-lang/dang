@@ -33,6 +33,30 @@ class TestFormatResearchInsight(unittest.TestCase):
         self.assertIn("종합", out)
 
 
+class TestSuggestKeywords(unittest.TestCase):
+    def test_extracts_soje_drops_region_and_offer(self):
+        # 혜택의 상품 명사만 남고, 지역·금액·판촉어는 빠진다.
+        kws = saved_research.suggest_keywords({
+            "industry": "안경원", "region": "공주",
+            "benefits": "변색렌즈 0원 다초점렌즈 50% 할인",
+            "ad_titles": "변색렌즈\n공주 안경 이벤트",
+        })
+        self.assertIn("변색렌즈", kws)
+        self.assertIn("다초점렌즈", kws)
+        self.assertNotIn("0원", kws)
+        self.assertNotIn("공주", kws)        # 지역 제외
+        self.assertNotIn("50%", kws)         # 금액/판촉 제외
+        self.assertNotIn("변색렌즈 0원", kws)  # 통짜 금지(토큰 분리)
+
+    def test_falls_back_to_industry_when_empty(self):
+        kws = saved_research.suggest_keywords({"industry": "마라탕", "region": "서울"})
+        self.assertEqual(kws, ["마라탕"])
+
+    def test_blank_project(self):
+        self.assertEqual(saved_research.suggest_keywords({}), [])
+        self.assertEqual(saved_research.suggest_keywords(None), [])
+
+
 class TestResearchContext(unittest.TestCase):
     def setUp(self):
         # DB 의존 격리: 인메모리 fake로 save/get 대체
@@ -68,6 +92,17 @@ class TestResearchContext(unittest.TestCase):
     def test_empty_insight_not_saved(self):
         self.assertFalse(saved_research.save_research_insight(7, {}, "x"))
         self.assertEqual(saved_research.research_context(7), "")
+
+    def test_get_saved_research_roundtrip(self):
+        # 저장 전엔 None, 저장 후엔 행 반환(화면 표시용).
+        self.assertIsNone(saved_research.get_saved_research(11))
+        saved_research.save_research_insight(11, _SAMPLE, "변색렌즈")
+        row = saved_research.get_saved_research(11)
+        self.assertIsNotNone(row)
+        self.assertIn("눈뽕 없는 렌즈", row["content"])
+
+    def test_get_saved_research_blank_id(self):
+        self.assertIsNone(saved_research.get_saved_research(0))
 
 
 class TestBuilderInjection(unittest.TestCase):

@@ -369,6 +369,11 @@ def project_page() -> None:
                                             ui.label(_fmt_budget(it["budget"])).classes("dg-campaign-budget")
                                         with ui.row().classes("dg-campaign-actions no-wrap gap-0"):
                                             ui.button(
+                                                icon="travel_explore", color=None,
+                                            ).props("flat round dense").classes("dg-quick-link").on(
+                                                "click.stop", lambda _, _pid=pid: _go(_pid, "/research")
+                                            ).tooltip("리서치 (기획 전 먼저)")
+                                            ui.button(
                                                 icon="edit_note", color=None,
                                             ).props("flat round dense").classes("dg-quick-link").on(
                                                 "click.stop", lambda _, _pid=pid: _go(_pid, "/plan/strategy")

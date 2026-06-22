@@ -49,6 +49,41 @@ from app.logger import get_logger
 _log = get_logger("planning_wizard")
 
 
+def _safe_ui(fn, *args, **kwargs):
+    """UI 호출을 끊김에 안전하게 감싼다.
+
+    생성/리서치는 수 분 걸려 그 사이 브라우저 탭이 닫히거나 새로고침되면 슬롯이 삭제되고,
+    이후 status.set_text/ui.notify/렌더가 'parent element ... deleted'를 던져 **작업 전체가
+    중단**된다(리서치·생성·저장까지 날아감). UI 갱신 실패는 무시해 핵심 작업은 끝까지 돌게 한다.
+    데이터는 save-before-render라 저장은 이미 끝나 있어, 새로고침하면 결과가 보인다.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception:  # noqa: BLE001 — 클라이언트 끊김 등 UI 예외는 핵심 작업에 영향 없음
+        return None
+
+
+def _render_research_banner(pid) -> None:
+    """이 기획에 반영된 커뮤니티 리서치를 화면에 표시(있으면). 호출은 컨테이너 컨텍스트 안에서."""
+    if not pid:
+        return
+    try:
+        from app.research.saved_research import get_saved_research
+        row = get_saved_research(pid)
+    except Exception:
+        _log.exception("리서치 배너 로드 실패")
+        return
+    if not row:
+        return
+    with ui.expansion("이 기획에 반영된 커뮤니티 리서치", icon="forum", value=True).classes(
+        "w-full dg-expansion"
+    ):
+        created = str(row.get("created_at", ""))[:16]
+        if created:
+            ui.label(f"수집 시각: {created} · /research 에서 다시 검색하면 갱신돼요").classes("dg-label-sm")
+        ui.markdown(str(row.get("content", ""))).classes("w-full dg-prose")
+
+
 def _research_block(pid) -> str:
     """저장된 커뮤니티 리서치 인사이트 주입 블록(있으면). 실패해도 기획은 정상."""
     if not pid:
@@ -593,6 +628,11 @@ def build_wizard_ui(
 
             _render_checkup_card(_wizard_state.get("step1_content", ""))
 
+            _render_research_banner(
+                _wizard_state.get("project_id")
+                or nicegui_app.storage.user.get("current_project_id")
+            )
+
             for key in _STRATEGY_SECTION_KEYS:
                 label = _STRATEGY_SECTION_LABELS[key]
                 body = sections.get(key, "(아직 내용이 없어요)")
@@ -747,19 +787,26 @@ def build_wizard_ui(
             status.set_text("전략 분석을 만들고 있어요...")
 
         try:
+            loop = asyncio.get_running_loop()
+            # 리서치는 명시적 1단계(/research). 여기선 저장된 리서치만 반영하고, 없으면 안내만 한다.
+            research_block = _research_block(pid)
+            if not research_block:
+                _safe_ui(ui.notify,
+                         "이 매장은 아직 커뮤니티 리서치 전이에요. /research에서 소재로 먼저 돌리면 기획에 반영돼요.",
+                         type="info", timeout=6000)
+
             guide, prompt = build_strategy_prompt(
                 project, current_ad=_collect_current_ad(),
                 wiki=store_wiki.wiki_context(pid, project),
-                research_block=_research_block(pid),
+                research_block=research_block,
                 budget_plan_context=_budget_block(project),
             )
-            loop = asyncio.get_running_loop()
             if engine == "coordinate":
                 from app.ai.coordination import coordinate_generate
                 content = await coordinate_generate(
                     loop, prompt, guide, "전략 분석",
-                    on_drafts=(lambda: status.set_text("Claude와 GPT가 각자 분석하고 있어요...")) if status else None,
-                    on_synth=(lambda: status.set_text("Claude가 두 분석을 종합하고 있어요...")) if status else None,
+                    on_drafts=(lambda: _safe_ui(status.set_text, "Claude와 GPT가 각자 분석하고 있어요...")) if status else None,
+                    on_synth=(lambda: _safe_ui(status.set_text, "Claude가 두 분석을 종합하고 있어요...")) if status else None,
                 )
             else:
                 provider = get_provider(engine)
@@ -769,7 +816,7 @@ def build_wizard_ui(
 
             # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
             if status:
-                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+                _safe_ui(status.set_text, "빠진 부분이 없는지 확인하고 있어요...")
             content = await loop.run_in_executor(
                 None, lambda: repair_output(content, get_schema("strategy"), engine=engine),
             )
@@ -778,17 +825,17 @@ def build_wizard_ui(
             _wizard_state["step1_sections"] = parse_strategy_sections(content)
             _wizard_state["project_id"] = pid
 
-            # Save to DB
+            # Save to DB (렌더보다 먼저 — 클라이언트가 끊겨도 결과는 보존된다)
             save_generated_content(pid, engine, content, content_type="strategy")
 
-            _render_strategy_result()
-            ui.notify("전략 분석이 완성됐어요!", type="positive")
+            _safe_ui(_render_strategy_result)
+            _safe_ui(ui.notify, "전략 분석이 완성됐어요!", type="positive")
 
         except Exception as exc:
             _log.exception("전략 분석 생성 실패: %s", exc)
-            ui.notify(f"전략 분석을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
+            _safe_ui(ui.notify, f"전략 분석을 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
             if status:
-                status.set_text(f"오류: {exc}")
+                _safe_ui(status.set_text, f"오류: {exc}")
         finally:
             if btn:
                 btn.props(remove="disabled loading")
@@ -815,13 +862,17 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("다시 만들고 있어요...")
+            _safe_ui(regen_status.set_text, "다시 만들고 있어요...")
 
         try:
+            loop = asyncio.get_running_loop()
+            # 리서치는 /research에서 선행 — 여기선 저장된 결과만 반영한다.
+            research_block = _research_block(pid)
+
             guide, prompt = build_strategy_prompt(
                 project, current_ad=_collect_current_ad(),
                 wiki=store_wiki.wiki_context(pid, project),
-                research_block=_research_block(pid),
+                research_block=research_block,
                 budget_plan_context=_budget_block(project),
             )
             if feedback.strip():
@@ -829,7 +880,6 @@ def build_wizard_ui(
             if _wizard_state["step1_content"]:
                 prompt += f"\n\n[이전 분석 결과 (참고하되 수정 요청 반영)]\n{_wizard_state['step1_content']}"
 
-            loop = asyncio.get_running_loop()
             provider = get_provider(engine)
             content = await loop.run_in_executor(
                 None, lambda: provider.generate_text(prompt, system_prompt=guide),
@@ -840,12 +890,12 @@ def build_wizard_ui(
 
             save_generated_content(pid, engine, content, content_type="strategy")
 
-            _render_strategy_result()
-            ui.notify("전략 분석을 다시 만들었어요!", type="positive")
+            _safe_ui(_render_strategy_result)
+            _safe_ui(ui.notify, "전략 분석을 다시 만들었어요!", type="positive")
 
         except Exception as exc:
             _log.exception("전략 분석 재생성 실패: %s", exc)
-            ui.notify(f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
+            _safe_ui(ui.notify, f"다시 만들지 못했어요. 잠시 후 다시 시도해 주세요. ({exc})", type="negative", timeout=8000)
         finally:
             if regen_btn:
                 regen_btn.props(remove="disabled loading")
@@ -2032,7 +2082,7 @@ def build_wizard_ui(
 
             # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
             if status:
-                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+                _safe_ui(status.set_text, "빠진 부분이 없는지 확인하고 있어요...")
             content = await loop.run_in_executor(
                 None, lambda: repair_output(content, get_schema("ad_settings"), engine=engine),
             )
@@ -2075,7 +2125,7 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("다시 만들고 있어요...")
+            _safe_ui(regen_status.set_text, "다시 만들고 있어요...")
 
         try:
             guide, prompt = build_ad_settings_prompt(
@@ -2352,7 +2402,7 @@ def build_wizard_ui(
 
             # 누락/부실 섹션이 있으면 1회 보정 (best-effort, 실패 시 원본 유지).
             if status:
-                status.set_text("빠진 부분이 없는지 확인하고 있어요...")
+                _safe_ui(status.set_text, "빠진 부분이 없는지 확인하고 있어요...")
             content = await loop.run_in_executor(
                 None, lambda: repair_output(content, get_schema("wizard_proposal"), engine=engine),
             )
@@ -2395,7 +2445,7 @@ def build_wizard_ui(
             regen_spinner.classes(remove="hidden")
         if regen_status:
             regen_status.classes(remove="hidden")
-            regen_status.set_text("다시 만들고 있어요...")
+            _safe_ui(regen_status.set_text, "다시 만들고 있어요...")
 
         try:
             guide, prompt = build_wizard_proposal_prompt(

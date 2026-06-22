@@ -41,8 +41,14 @@ def _normalize_url(url: str) -> str:
 
 def discover(
     keyword: str, source_ids, limit_per_source: int = 8,
+    period_months: int | None = None, sort: str = "sim",
 ) -> tuple[list[C.DiscoveryResult], list[str]]:
-    """선택 소스별로 발견. (결과, 키없음_label) 반환. 키 없는 소스는 건너뛴다."""
+    """선택 소스별로 발견. (결과, 키없음_label) 반환. 키 없는 소스는 건너뛴다.
+
+    period_months: 그 기간보다 오래된 글은 제외(네이버 blog/news·구글은 실제 필터,
+    날짜 미제공 소스는 적합도 상위 건수로 동작).
+    sort: 네이버 정렬. 기본 'sim'(정확도순) — 리서치 적합성 핵심.
+    """
     results: list[C.DiscoveryResult] = []
     key_missing: list[str] = []
     seen: set[str] = set()
@@ -52,9 +58,11 @@ def discover(
             continue
         try:
             if sp.discovery_method == "NAVER_API":
-                found = C.discover_naver(keyword, sp.id, sp.naver_api_type or "blog", limit_per_source)
+                found = C.discover_naver(keyword, sp.id, sp.naver_api_type or "blog",
+                                         limit_per_source, period_months, sort=sort)
             else:
-                found = C.discover_google_cse(keyword, sp.id, sp.cse_site_domain, limit_per_source)
+                found = C.discover_google_cse(keyword, sp.id, sp.cse_site_domain,
+                                              limit_per_source, period_months=period_months)
         except C.ResearchKeyMissing:
             key_missing.append(sp.label)
             continue
@@ -108,14 +116,39 @@ def analyze(keyword: str, documents: list[dict], generate_text) -> dict:
 
 
 def run_research(
-    keyword: str, source_ids, generate_text,
-    *, limit_per_source: int = 8, max_docs: int = 12, progress=None,
+    keyword, source_ids, generate_text,
+    *, limit_per_source: int = 8, max_docs: int = 12,
+    period_months: int | None = None, sort: str = "sim", progress=None,
 ) -> ResearchRun:
-    """전체 파이프라인. progress(msg) 콜백으로 진행 상황 보고."""
-    run = ResearchRun(keyword=keyword)
+    """전체 파이프라인. progress(msg) 콜백으로 진행 상황 보고.
+
+    keyword: 문자열 1개 또는 여러 개(list). 여러 개면 각각 따로 검색해 합치고 중복제거(중첩).
+    period_months: 최근 N개월 글만 본다(기본 None=기간 제한 없음). 건수(limit_per_source/
+    max_docs)는 안전 상한으로 함께 동작한다.
+    sort: 네이버 정렬. 기본 'sim'(정확도순).
+    """
+    kws = [keyword] if isinstance(keyword, str) else list(keyword)
+    kws = [str(k).strip() for k in kws if k and str(k).strip()]
+    run = ResearchRun(keyword=", ".join(kws))
+    if not kws:
+        return run
+
     if progress:
         progress("커뮤니티 검색 중...")
-    results, key_missing = discover(keyword, source_ids, limit_per_source)
+    results: list[C.DiscoveryResult] = []
+    key_missing: list[str] = []
+    seen: set[str] = set()
+    for kw in kws:
+        found, km = discover(kw, source_ids, limit_per_source, period_months, sort)
+        for lbl in km:
+            if lbl not in key_missing:
+                key_missing.append(lbl)
+        for r in found:
+            key = _normalize_url(r.url)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            results.append(r)
     run.discovered = len(results)
     run.key_missing = key_missing
     run.sources_used = sorted({r.source_policy_id for r in results})
@@ -131,44 +164,56 @@ def run_research(
 
     if progress:
         progress("AI가 커뮤니티 반응을 분석하고 있어요...")
-    run.insight = analyze(keyword, docs, generate_text)
+    run.insight = analyze(run.keyword, docs, generate_text)
     return run
 
 
 # ───────────────────────── 경쟁 광고 관측 (observe-ads 포팅) ─────────────────────────
 
-def observe_ads(keyword: str, engines=("GOOGLE", "NAVER", "META"), progress=None) -> list:
-    """google→naver→meta 순차 관측(observe-ads.worker.ts 포팅). Playwright 필수.
+def observe_ads(keyword, engines=("GOOGLE", "NAVER", "META"), progress=None) -> list:
+    """google·naver·meta 관측(observe-ads.worker.ts 포팅). Playwright 필수.
 
-    엔진별로 에러를 격리해(하나 실패해도 나머지 진행) AdObservation 리스트를 모은다.
+    keyword: 문자열 1개 또는 여러 개(list). 여러 개면 엔진마다 키워드별로 각각 관측해 합치고
+    (엔진+랜딩URL+헤드라인) 기준 중복제거 → 모든 키워드·모든 엔진을 활용한다.
+    엔진별로 에러를 격리(하나 실패해도 나머지 진행). 구글은 봇 차단(/sorry)으로 0건일 수 있음.
     Playwright 미설치면 PlaywrightMissing을 그대로 올린다(UI가 안내).
     """
     import time
     from app.research.stealth import StealthBrowser, random_delay_seconds
     from app.research import ads as A
 
+    kws = [keyword] if isinstance(keyword, str) else list(keyword)
+    kws = [str(k).strip() for k in kws if k and str(k).strip()]
     observations: list = []
+    seen: set = set()
     with StealthBrowser() as context:
         steps = [
-            ("GOOGLE", "구글 검색광고 관측 중...", A.extract_google_ads),
-            ("NAVER", "네이버 파워링크·브랜드검색 관측 중...", A.extract_naver_ads),
-            ("META", "메타 광고 라이브러리 관측 중...", A.extract_meta_ads),
+            ("GOOGLE", "구글 검색광고", A.extract_google_ads),
+            ("NAVER", "네이버 파워링크·브랜드검색", A.extract_naver_ads),
+            ("META", "메타 광고 라이브러리", A.extract_meta_ads),
         ]
-        for i, (engine, msg, extractor) in enumerate(steps):
+        for engine, label, extractor in steps:
             if engine not in engines:
                 continue
-            if progress:
-                progress(msg)
-            page = context.new_page()
-            try:
-                observations.extend(extractor(page, keyword))
-            except Exception as exc:  # noqa: BLE001 — 엔진별 격리
-                _log.warning("ad observation failed (%s): %s", engine, exc)
-            finally:
+            for kw in kws:
+                if progress:
+                    progress(f"{label} 관측 중... — '{kw}'")
+                page = context.new_page()
                 try:
-                    page.close()
-                except Exception:  # noqa: BLE001
-                    pass
-            if i < len(steps) - 1:
+                    for obs in extractor(page, kw):
+                        key = (obs.engine,
+                               (obs.landing_url or obs.display_url or "").lower(),
+                               (obs.headline or "").lower())
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        observations.append(obs)
+                except Exception as exc:  # noqa: BLE001 — 엔진/키워드별 격리
+                    _log.warning("ad observation failed (%s, %r): %s", engine, kw, exc)
+                finally:
+                    try:
+                        page.close()
+                    except Exception:  # noqa: BLE001
+                        pass
                 time.sleep(random_delay_seconds(1500, 3500))
     return observations

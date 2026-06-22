@@ -33,6 +33,7 @@ async def save_as_download_multi(pairs: list[tuple[bytes, str]]) -> bool:
 NAV_SECTIONS = [
     ("기획", [
         ("folder_open", "프로젝트 관리", "/"),
+        ("forum", "AI 상담", "/briefing"),
         ("travel_explore", "커뮤니티 리서치", "/research"),
         ("edit_note", "광고 기획", "/plan/strategy"),
         ("image", "썸네일 제작", "/thumbnail"),
@@ -52,6 +53,7 @@ NAV_PAGES = [item for _, items in NAV_SECTIONS for item in items]
 # (아이콘, 단계명, 부제, 경로)
 WORKFLOW_STEPS = [
     ("storefront", "매장·캠페인", "작업 대상 선택", "/"),
+    ("forum", "AI 상담", "행사 내용 → AI 정리", "/briefing"),
     ("travel_explore", "커뮤니티 리서치", "고객 목소리 (기획 전 선행)", "/research"),
     ("edit_note", "광고 기획", "전략·소식글·세팅·제안서 한 번에", "/plan/strategy"),
     ("image", "썸네일 제작", "광고 이미지", "/thumbnail"),

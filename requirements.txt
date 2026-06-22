@@ -12,6 +12,8 @@ Pillow>=10.0.0
 # 커뮤니티 리서치 (검색 → 본문/댓글 수집 → AI 분석)
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+# AI 상담/브리핑 PDF 첨부 읽기 (이미지는 ANTHROPIC_API_KEY로 Claude 비전)
+pypdf>=4.0.0
 readability-lxml>=0.8.1
 lxml>=5.0.0
 # playwright는 선택 — 커뮤니티 본문 수집 + 경쟁 광고 관측(observe-ads)에 필요. 미설치면 HTTP만/광고관측 비활성.
