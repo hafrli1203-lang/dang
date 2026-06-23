@@ -153,6 +153,31 @@ def init_db() -> None:
                 value      TEXT NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now','localtime'))
             );
+
+            CREATE TABLE IF NOT EXISTS briefing_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  INTEGER NOT NULL,
+                role        TEXT NOT NULL,
+                text        TEXT NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ad_observations (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id      INTEGER NOT NULL,
+                engine          TEXT NOT NULL,
+                keyword         TEXT DEFAULT '',
+                headline        TEXT DEFAULT '',
+                description     TEXT DEFAULT '',
+                display_url     TEXT DEFAULT '',
+                landing_url     TEXT DEFAULT '',
+                position        INTEGER DEFAULT 0,
+                heuristic_score REAL DEFAULT 0,
+                ad_type         TEXT DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
         """)
         # Migration for existing DBs: add content_type column if missing
         try:
@@ -349,6 +374,60 @@ def get_latest_report(project_id: int) -> Optional[Dict]:
             (project_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+# ── Briefing Chat (AI 상담 대화 — 매장별 자동 저장/이어보기) ──────────────────
+
+def save_briefing_message(project_id: int, role: str, text: str) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO briefing_messages (project_id, role, text) VALUES (?,?,?)",
+            (project_id, role, text),
+        )
+        return cur.lastrowid
+
+
+def get_briefing_messages(project_id: int) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM briefing_messages WHERE project_id=? ORDER BY id",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_briefing_messages(project_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM briefing_messages WHERE project_id=?", (project_id,)
+        )
+
+
+# ── Ad Observations (경쟁 광고 관측 — 매장별 최신 스냅샷 저장) ─────────────────
+
+def save_ad_observations(project_id: int, rows: List[Dict]) -> None:
+    """최신 관측으로 교체(매장당 한 스냅샷). 빈 리스트면 기존 것 유지."""
+    if not rows:
+        return
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ad_observations WHERE project_id=?", (project_id,))
+        conn.executemany(
+            """INSERT INTO ad_observations
+               (project_id, engine, keyword, headline, description, display_url,
+                landing_url, position, heuristic_score, ad_type)
+               VALUES (:project_id,:engine,:keyword,:headline,:description,:display_url,
+                :landing_url,:position,:heuristic_score,:ad_type)""",
+            [{**r, "project_id": project_id} for r in rows],
+        )
+
+
+def get_ad_observations(project_id: int) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ad_observations WHERE project_id=? ORDER BY heuristic_score DESC, id",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ── App Settings ───────────────────────────────────────────────────────────

@@ -401,7 +401,16 @@ def research_page() -> None:
                 )
                 _render_ads(obs)
                 ads_card.classes(remove="hidden")
-                ui.notify(f"광고 관측 완료 — {len(obs)}건", type="positive")
+                # 선택된 매장이 있으면 관측을 저장 → 새로고침/재방문해도 남는다.
+                pid = nicegui_app.storage.user.get("current_project_id")
+                if pid and obs:
+                    from app.research.saved_research import save_observations
+                    if save_observations(pid, obs):
+                        ui.notify(f"광고 관측 완료 — {len(obs)}건 (이 매장에 저장했어요)", type="positive")
+                    else:
+                        ui.notify(f"광고 관측 완료 — {len(obs)}건", type="positive")
+                else:
+                    ui.notify(f"광고 관측 완료 — {len(obs)}건", type="positive")
             except Exception:  # noqa: BLE001
                 _log.exception("Ad observation failed")
                 ui.notify("광고 관측 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.",
@@ -409,6 +418,20 @@ def research_page() -> None:
             finally:
                 progress_row.classes("hidden")
                 ads_btn.props(remove="disabled")
+
+        # 페이지 진입 시 이 매장에 저장된 경쟁 광고 관측을 바로 복원(새로고침해도 남게).
+        def _restore_ads() -> None:
+            pid = nicegui_app.storage.user.get("current_project_id")
+            if not pid:
+                return
+            from app.research.saved_research import get_saved_observations
+            saved = get_saved_observations(pid)
+            if not saved:
+                return
+            _render_ads(saved)
+            ads_card.classes(remove="hidden")
+
+        _restore_ads()
 
         run_btn.on_click(_run)
         ads_btn.on_click(_run_ads)

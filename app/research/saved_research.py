@@ -9,8 +9,12 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
-from app.database import save_generated_content, get_latest_content
+from app.database import (
+    save_generated_content, get_latest_content,
+    save_ad_observations as _db_save_ads, get_ad_observations as _db_get_ads,
+)
 from app.research.insight import format_research_insight
 from app.logger import get_logger
 
@@ -68,6 +72,41 @@ def save_research_insight(project_id: int, insight: dict, keyword: str = "") -> 
     except Exception:
         _log.exception("리서치 인사이트 저장 실패")
         return False
+
+
+def save_observations(project_id: int, observations) -> bool:
+    """경쟁 광고 관측(AdObservation 리스트)을 매장별 최신 스냅샷으로 저장."""
+    if not project_id or not observations:
+        return False
+    rows = [{
+        "engine": getattr(o, "engine", "") or "",
+        "keyword": getattr(o, "keyword", "") or "",
+        "headline": getattr(o, "headline", "") or "",
+        "description": getattr(o, "description", "") or "",
+        "display_url": getattr(o, "display_url", "") or "",
+        "landing_url": getattr(o, "landing_url", "") or "",
+        "position": int(getattr(o, "position", 0) or 0),
+        "heuristic_score": float(getattr(o, "heuristic_score", 0) or 0),
+        "ad_type": getattr(o, "ad_type", "") or "",
+    } for o in observations]
+    try:
+        _db_save_ads(project_id, rows)
+        return True
+    except Exception:
+        _log.exception("경쟁 광고 관측 저장 실패")
+        return False
+
+
+def get_saved_observations(project_id: int) -> list:
+    """저장된 관측을 화면 렌더용 객체(속성 접근)로 복원. 없으면 []."""
+    if not project_id:
+        return []
+    try:
+        rows = _db_get_ads(project_id)
+    except Exception:
+        _log.exception("저장된 광고 관측 로드 실패")
+        return []
+    return [SimpleNamespace(**r) for r in rows]
 
 
 def get_saved_research(project_id: int):

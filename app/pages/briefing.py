@@ -13,6 +13,10 @@ from app.common import create_nav, next_step_bar
 from app.theme import section_header
 from app.logger import get_logger
 from app.ai.providers import get_provider
+from app.database import (
+    save_briefing_message, get_briefing_messages, clear_briefing_messages,
+    get_setting, save_setting,
+)
 from app.research.briefing import (
     extract_text, build_chat_prompt, extract_keywords,
     SYSTEM_GUIDE_BRIEFING, BriefingUnsupported,
@@ -25,7 +29,9 @@ _log = get_logger("briefing")
 def briefing_page() -> None:
     create_nav("/briefing")
 
-    state: dict = {"messages": []}  # [(role, text)] role: 'user' | 'ai'
+    # 현재 매장(프로젝트)에 대화를 묶어 자동 저장 → 다시 열면 이어보기.
+    pid = nicegui_app.storage.user.get("current_project_id")
+    state: dict = {"messages": [], "pid": pid}  # [(role, text)] role: 'user' | 'ai'
 
     with ui.column().classes("dg-page-content w-full gap-5"):
         next_step_bar("/briefing")
@@ -34,6 +40,15 @@ def briefing_page() -> None:
             "행사·캠페인 내용을 붙여넣거나 파일로 올리면 Claude가 읽고 같이 정리해요. "
             "정리되면 '이 내용으로 리서치'로 실제 고객 반응·경쟁 광고까지 이어가요."
         ).classes("dg-page-subtitle")
+
+        if not pid:
+            with ui.element("div").classes("w-full").style(
+                "background:#FFF4E5; border:1px solid #F5C58A; border-radius:10px; padding:10px 14px;"
+            ):
+                ui.label(
+                    "매장을 먼저 선택하면 대화가 그 매장에 자동 저장돼요. "
+                    "지금은 매장이 없어 이번 대화는 저장되지 않아요."
+                ).classes("dg-label-sm")
 
         # ── 입력: 파일 업로드 + 붙여넣기 ──
         with ui.card().classes("dg-card w-full"):
@@ -49,35 +64,42 @@ def briefing_page() -> None:
                 ui.notify(f"'{name}' 읽는 중...", type="info")
                 try:
                     loop = asyncio.get_running_loop()
-                    # docx/pdf/이미지(비전 API)는 느릴 수 있어 executor에서.
+                    # docx/pdf/이미지(비전)는 느릴 수 있어 executor에서.
                     text = await loop.run_in_executor(None, lambda: extract_text(name, data))
                 except BriefingUnsupported as ex:
                     ui.notify(str(ex), type="warning", timeout=8000)
                     return
                 except Exception:  # noqa: BLE001
                     _log.exception("파일 읽기 실패")
-                    ui.notify("파일을 읽지 못했어요. 내용을 붙여넣어 주세요.", type="negative")
+                    ui.notify(f"'{name}'을(를) 읽지 못했어요. 내용을 붙여넣어 주세요.", type="negative")
                     return
                 if not text.strip():
-                    ui.notify("파일에서 글자를 못 찾았어요. 내용을 붙여넣어 주세요.", type="warning")
+                    ui.notify(f"'{name}'에서 글자를 못 찾았어요.", type="warning")
                     return
-                # 기존 내용에 이어 붙임(여러 파일/붙여넣기 혼용 대비).
-                brief_input.value = (brief_input.value + "\n\n" + text).strip() if brief_input.value else text
-                ui.notify(f"'{name}'에서 {len(text):,}자 불러왔어요.", type="positive")
+                # 여러 파일/붙여넣기 혼용: 파일명 머리표를 붙여 기존 내용 아래에 누적.
+                block = f"━━ [{name}] ━━\n{text}"
+                brief_input.value = (brief_input.value.rstrip() + "\n\n" + block) if brief_input.value.strip() else block
+                ui.notify(f"'{name}'에서 {len(text):,}자 추가했어요.", type="positive")
+                _save_draft()
 
-            ui.upload(on_upload=_on_upload, auto_upload=True, max_files=1).props(
+            ui.upload(on_upload=_on_upload, auto_upload=True, multiple=True).props(
                 'accept=".txt,.md,.csv,.docx,.pdf,.png,.jpg,.jpeg,.webp" flat'
             ).classes("w-full dg-uploader")
             ui.label(
-                ".txt·.docx·PDF·이미지(포스터/전단) 지원. 이미지는 Claude가 글자를 읽어와요(몇 초 걸려요)."
+                "파일 여러 장 한 번에 올릴 수 있어요(.txt·.docx·PDF·이미지). "
+                "이미지(포스터/전단)는 Claude가 글자를 읽어와요(장당 몇 초). 올린 내용은 위 '내용' 칸에 쌓여요."
             ).classes("dg-label-sm")
 
         # ── 대화 ──
         with ui.card().classes("dg-card w-full"):
-            section_header("forum", "AI와 정리하기", "내용을 읽은 Claude와 대화하며 광고 방향을 잡아요.")
-            chat_col = ui.column().classes("w-full gap-2")
-            with chat_col:
-                _empty = ui.label("내용을 넣고 아래에 물어보세요. 예: '이 행사 광고로 어떻게 풀지?'").classes("dg-label-sm")
+            section_header("forum", "AI와 정리하기", "내용을 읽은 Claude와 대화하며 광고 방향을 잡아요. 대화는 아래로 쌓여요.")
+            chat_scroll = ui.scroll_area().classes("w-full").style(
+                "height: 380px; border:1px solid var(--dg-border,#e5e7eb); border-radius:10px; padding:8px;"
+            )
+            with chat_scroll:
+                chat_col = ui.column().classes("w-full gap-2")
+                with chat_col:
+                    _empty = ui.label("내용을 넣고 아래에 물어보세요. 예: '이 행사 광고로 어떻게 풀지?'").classes("dg-label-sm")
 
             progress_row = ui.row().classes("items-center gap-2 hidden")
             with progress_row:
@@ -89,6 +111,8 @@ def briefing_page() -> None:
                     placeholder="질문하거나 '광고 관점에서 정리해줘'라고 해보세요.",
                 ).classes("flex-1 dg-input").props("outlined autogrow")
                 send_btn = ui.button("보내기", icon="send").classes("dg-btn-primary")
+            with ui.row().classes("w-full justify-end"):
+                clear_btn = ui.button("대화 비우기", icon="delete_outline").props("flat dense").classes("dg-btn-text")
 
         # ── 다음으로: 리서치/광고관측 (여기서 바로 보거나 리서치 화면으로) ──
         with ui.card().classes("dg-card w-full"):
@@ -106,15 +130,29 @@ def briefing_page() -> None:
 
         # ───────── handlers ─────────
 
-        def _add_msg(role: str, text: str) -> None:
+        def _save_draft() -> None:
+            """행사 내용(원본 소재)도 매장별로 저장 → 다시 열면 복원."""
+            if not state["pid"]:
+                return
+            try:
+                save_setting(f"briefing_draft_{state['pid']}", brief_input.value or "")
+            except Exception:  # noqa: BLE001
+                _log.exception("briefing draft save failed")
+
+        def _add_msg(role: str, text: str, persist: bool = True) -> None:
             state["messages"].append((role, text))
+            if persist and state["pid"]:
+                try:
+                    save_briefing_message(state["pid"], role, text)
+                except Exception:  # noqa: BLE001
+                    _log.exception("briefing message save failed")
             _empty.set_visibility(False)
             with chat_col:
                 me = role == "user"
                 with ui.element("div").classes("w-full").style(
                     "display:flex; justify-content:" + ("flex-end" if me else "flex-start")
                 ):
-                    bubble = ui.element("div").style(
+                    bubble = ui.element("div").classes("dg-chat-bubble").style(
                         "max-width:80%; padding:10px 14px; border-radius:12px; white-space:pre-wrap; "
                         "line-height:1.6; font-size:14px; "
                         + ("background:var(--dg-primary); color:#fff;"
@@ -122,6 +160,11 @@ def briefing_page() -> None:
                     )
                     with bubble:
                         ui.markdown(text) if not me else ui.label(text)
+            # 새 메시지마다 맨 아래로 스크롤(대화가 아래로 쌓이며 최신이 보이게).
+            try:
+                chat_scroll.scroll_to(percent=1.0)
+            except Exception:  # noqa: BLE001
+                pass
 
         async def _send() -> None:
             user_msg = (msg_input.value or "").strip()
@@ -132,6 +175,7 @@ def briefing_page() -> None:
             if not user_msg:
                 user_msg = "이 내용을 광고 관점에서 정리해 줘."
             _add_msg("user", user_msg)
+            _save_draft()
             msg_input.value = ""
             history = state["messages"][:-1]  # 방금 추가한 user 제외
             send_btn.props("disabled loading")
@@ -254,6 +298,33 @@ def briefing_page() -> None:
                 analyze_btn.props(remove="disabled loading")
                 analyze_progress.classes("hidden")
 
+        def _clear_chat() -> None:
+            nonlocal _empty
+            if state["pid"]:
+                try:
+                    clear_briefing_messages(state["pid"])
+                except Exception:  # noqa: BLE001
+                    _log.exception("briefing clear failed")
+            state["messages"] = []
+            chat_col.clear()
+            with chat_col:
+                _empty = ui.label(
+                    "내용을 넣고 아래에 물어보세요. 예: '이 행사 광고로 어떻게 풀지?'"
+                ).classes("dg-label-sm")
+            ui.notify("대화를 비웠어요.", type="info")
+
         send_btn.on_click(_send)
         to_research_btn.on_click(_to_research)
         analyze_btn.on_click(_analyze_here)
+        clear_btn.on_click(_clear_chat)
+
+        # ── 이어보기: 이 매장의 지난 대화/원본 내용을 복원 ──
+        if state["pid"]:
+            try:
+                draft = get_setting(f"briefing_draft_{state['pid']}")
+                if draft:
+                    brief_input.value = draft
+                for m in get_briefing_messages(state["pid"]):
+                    _add_msg(m["role"], m["text"], persist=False)
+            except Exception:  # noqa: BLE001
+                _log.exception("briefing restore failed")

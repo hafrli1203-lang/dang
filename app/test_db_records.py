@@ -30,6 +30,81 @@ class _IsolatedDB(unittest.TestCase):
             pass
 
 
+class TestBriefingMessages(_IsolatedDB):
+    """AI 상담 대화 매장별 저장/이어보기/비우기."""
+
+    def test_save_and_load_in_order(self):
+        pid = db.save_project({"name": "브리핑매장"})
+        db.save_briefing_message(pid, "user", "이 행사 어떻게 풀지?")
+        db.save_briefing_message(pid, "ai", "연령 찢어서 가시죠.")
+        msgs = db.get_briefing_messages(pid)
+        self.assertEqual(
+            [(m["role"], m["text"]) for m in msgs],
+            [("user", "이 행사 어떻게 풀지?"), ("ai", "연령 찢어서 가시죠.")],
+        )
+
+    def test_scoped_per_project(self):
+        a = db.save_project({"name": "A"})
+        b = db.save_project({"name": "B"})
+        db.save_briefing_message(a, "user", "A질문")
+        db.save_briefing_message(b, "user", "B질문")
+        self.assertEqual([m["text"] for m in db.get_briefing_messages(a)], ["A질문"])
+        self.assertEqual([m["text"] for m in db.get_briefing_messages(b)], ["B질문"])
+
+    def test_clear_only_target_project(self):
+        a = db.save_project({"name": "A"})
+        b = db.save_project({"name": "B"})
+        db.save_briefing_message(a, "user", "A")
+        db.save_briefing_message(b, "user", "B")
+        db.clear_briefing_messages(a)
+        self.assertEqual(db.get_briefing_messages(a), [])
+        self.assertEqual(len(db.get_briefing_messages(b)), 1)
+
+    def test_empty_when_none(self):
+        pid = db.save_project({"name": "빈"})
+        self.assertEqual(db.get_briefing_messages(pid), [])
+
+
+class TestAdObservations(_IsolatedDB):
+    """경쟁 광고 관측 매장별 저장/복원/스냅샷 교체."""
+
+    def _rows(self, *headlines):
+        return [{
+            "engine": "NAVER", "keyword": "렌즈", "headline": h, "description": "",
+            "display_url": "", "landing_url": "", "position": i + 1,
+            "heuristic_score": float(10 - i), "ad_type": "powerlink",
+        } for i, h in enumerate(headlines)]
+
+    def test_save_and_load_ordered_by_score(self):
+        pid = db.save_project({"name": "관측매장"})
+        db.save_ad_observations(pid, self._rows("A", "B", "C"))
+        got = db.get_ad_observations(pid)
+        # heuristic_score DESC → A(10) 먼저.
+        self.assertEqual([r["headline"] for r in got], ["A", "B", "C"])
+        self.assertEqual(got[0]["heuristic_score"], 10.0)
+
+    def test_replace_is_latest_snapshot(self):
+        pid = db.save_project({"name": "S"})
+        db.save_ad_observations(pid, self._rows("old1", "old2"))
+        db.save_ad_observations(pid, self._rows("new1"))
+        got = db.get_ad_observations(pid)
+        self.assertEqual([r["headline"] for r in got], ["new1"])
+
+    def test_empty_list_keeps_existing(self):
+        pid = db.save_project({"name": "S"})
+        db.save_ad_observations(pid, self._rows("keep"))
+        db.save_ad_observations(pid, [])  # 빈 관측은 기존 유지
+        self.assertEqual(len(db.get_ad_observations(pid)), 1)
+
+    def test_scoped_per_project(self):
+        a = db.save_project({"name": "A"})
+        b = db.save_project({"name": "B"})
+        db.save_ad_observations(a, self._rows("Aad"))
+        db.save_ad_observations(b, self._rows("Bad"))
+        self.assertEqual([r["headline"] for r in db.get_ad_observations(a)], ["Aad"])
+        self.assertEqual([r["headline"] for r in db.get_ad_observations(b)], ["Bad"])
+
+
 class TestAdRecordFields(_IsolatedDB):
     def test_save_and_load_roundtrip(self):
         pid = db.save_project({
